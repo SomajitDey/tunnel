@@ -75,16 +75,17 @@ client(){
 
   echo -e "tunnel-client: Forwarding localhost:${self##*:} to ${peer}. Session-key ${sess_key}\n"
   local pairing="$(digest "${self}" "${peer}" "${sess_key}")"
-  local lock="/tmp/${pairing}"
-  socat "${TUNNEL_L4}-LISTEN:${self##*:},reuseaddr,fork" \
-    EXEC:"${script_file} -c _forward ${self//:/\\:} ${peer//:/\\:} ${sess_key}" &
-  local socat_pid="${!}"
-  trap "rm -f \${lock}; pkill -P \${BASHPID}; kill -KILL -\${BASHPID}; return" INT TERM QUIT HUP
+  local lock="/tmp/${pairing}" socat_lock="/tmp/$(digest "${self}" "${peer}")"
+  socat -L "${socat_lock}" "${TUNNEL_L4}-LISTEN:${self##*:},reuseaddr,fork" \
+    EXEC:"${script_file} -c _forward ${self//:/\\:} ${peer//:/\\:}" &
+  trap "rm -f \${socat_lock} \${lock}; pkill -P \${BASHPID}; kill -KILL -\${BASHPID}; return" INT TERM QUIT HUP
   # Below is the keepalive (pinging) loop. Otherwise, an idle `curl https://ppng.io/${pairing}` is dropped by 2m.
   # Failure to ping the server triggers reconnect.
+  until [[ -e "${socat_lock}" ]];do sleep 0.01;done; echo "${sess_key}" > "${socat_lock}"
+  # Wait till socat_lock is created by the background socat, then write sess_key therein for forward to read
   while sleep 7; do
     flock -nE0 "${lock}" "${script_file}" -c pub "${pairing}" "ping" || break
-  done && kill "${socat_pid}" && rm -f "${lock}" && client "${@}"
+  done && rm -f "${lock}" && client "${@}"
 }>&2; export -f client
 
 server(){
@@ -109,11 +110,15 @@ server(){
 
 _forward(){
   # Brief: Connection manager for client. Called by function: `client`. Type: subshell proc.
-  # Usage: _forward <self_ID:local_port> <peer_ID:peer_port> <session_key>
-  local self="${1}" peer="${2}" sess_key="${3}"
+  # Usage: _forward <self_ID:local_port> <peer_ID:peer_port>
+  local self="${1}" peer="${2}"
   local source="${SOCAT_PEERADDR}:${SOCAT_PEERPORT}"
-  local pairing="$(digest "${self}" "${peer}" "${sess_key}")"
-  flock -w 1 "/tmp/${pairing}" "${script_file}" -c pub "${pairing}" "${source}" || return "${?}"
+  local socat_lock="/tmp/$(digest "${self}" "${peer}")"
+  local sess_key="$(head -n1 "${socat_lock}")"
+  local pairing="$(digest "${self}" "${peer}" "${sess_key:=nil}")"
+  local lock="/tmp/${pairing}"
+  # Substituting "nil" for empty sess_key makes sure if socat_lock is empty then lock can't exist
+  [[ -e "${lock}" ]] && flock -w 1 "${lock}" "${script_file}" -c pub "${pairing}" "${source}" || return "${?}"
   echo -e "tunnel-connect: ${source} <--> ${self} <--> ${peer}\n" >&2
   local wchan="$(digest "${source}" "${self}" "${peer}")" # Out Stream: Source -> Self -> Peer
   local rchan="$(digest "${peer}" "${self}" "${source}")" # In Stream: Peer -> Self -> Source
