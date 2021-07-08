@@ -230,10 +230,21 @@ install(){
   esac && echo "Installed. Check with command (may need to open a new terminal): tunnel"
 }; export -f install
 
+check_dep(){
+  # Brief: Check if the dependencies are present
+  local -a need dep=( socat curl openssl xxd base64 dd cut awk flock pkill mktemp )
+  local tool
+  for tool in "${dep[@]}";do
+    command -v "${tool}" || need+=($'\n'"  ${tool}")
+  done &>/dev/null
+  if [[ -n "${need[@]}" ]];then 
+    echo "Install these tools first: ${need[@]}"
+    return 1
+  fi
+} >&2; export -f check_dep
+
 main(){
-  command -v socat &>/dev/null || { echo "Install socat first" >&2; exit 1;}
-  command -v curl &>/dev/null || { echo "Install curl first" >&2; exit 1;}
-  command -v openssl &>/dev/null || { echo "Install openssl first" >&2; exit 1;}
+  check_dep || return 1
 
   local opt subcommand logfile local_port
   while getopts k:p:ucl:b:ihv opt; do
