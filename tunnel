@@ -75,16 +75,18 @@ client(){
 
   echo -e "tunnel-client: Forwarding localhost:${self##*:} to ${peer}. Session-key ${sess_key}\n"
   local pairing="$(digest "${self}" "${peer}" "${sess_key}")"
-  local lock="/tmp/${pairing}"
-  socat "${TUNNEL_L4}-LISTEN:${self##*:},reuseaddr,fork" \
-    EXEC:"${script_file} -c _forward ${self//:/\\:} ${peer//:/\\:} ${sess_key}" &
-  local socat_pid="${!}"
-  trap "rm -f \${lock}; pkill -P \${BASHPID}; kill -KILL -\${BASHPID}; return" INT TERM QUIT HUP
+  local lock="/tmp/${pairing}" socat_lock="/tmp/$(digest "${self}" "${peer}")"
+  socat -L "${socat_lock}" "${TUNNEL_L4}-LISTEN:${self##*:},reuseaddr,fork" \
+    EXEC:"${script_file} -c _forward ${self//:/\\:} ${peer//:/\\:}" &
+  trap "rm -f \${socat_lock} \${lock}; pkill -P \${BASHPID}; kill -KILL -\${BASHPID}; return" INT TERM QUIT HUP
+
   # Below is the keepalive (pinging) loop. Otherwise, an idle `curl https://ppng.io/${pairing}` is dropped by 2m.
-  # Failure to ping the server triggers reconnect.
+  # Failure to ping the server triggers reconnect (with new sess_key for forward secrecy).
+  until [[ -e "${socat_lock}" ]];do sleep 0.01;done; echo "${sess_key}" > "${socat_lock}"
+  # Wait till socat_lock is created by the background socat, then write sess_key therein for `_forward` to read
   while sleep 7; do
     flock -nE0 "${lock}" "${script_file}" -c pub "${pairing}" "ping" || break
-  done && kill "${socat_pid}" && rm -f "${lock}" && client "${@}"
+  done && rm -f "${lock}" && client "${@}" # This recursion won't launch socat again thanks to socat_lock
 }>&2; export -f client
 
 server(){
@@ -95,7 +97,7 @@ server(){
   echo -e "\ntunnel-server: PID=${BASHPID}; Started: $(date)"
   echo "tunnel-server: Listening for incoming connections to localhost:${self##*:}..."
   echo -e "tunnel-server: For peers to connect, share $(command tput smso 2>/dev/null)\"${self}\"$(command tput rmso 2>/dev/null) & your secret key (if any)\n"
-  # Using command with tput above, protects against unavailablity of the tput command 
+  # Using `command` with tput above, protects against unavailablity of the tput command 
   local -i req_count=0
   local buffer loop=true; trap "loop=false; pkill -P \${BASHPID}; return" INT TERM QUIT HUP
   while "${loop}"; do
@@ -109,11 +111,15 @@ server(){
 
 _forward(){
   # Brief: Connection manager for client. Called by function: `client`. Type: subshell proc.
-  # Usage: _forward <self_ID:local_port> <peer_ID:peer_port> <session_key>
-  local self="${1}" peer="${2}" sess_key="${3}"
+  # Usage: _forward <self_ID:local_port> <peer_ID:peer_port>
+  local self="${1}" peer="${2}"
   local source="${SOCAT_PEERADDR}:${SOCAT_PEERPORT}"
-  local pairing="$(digest "${self}" "${peer}" "${sess_key}")"
-  flock -w 1 "/tmp/${pairing}" "${script_file}" -c pub "${pairing}" "${source}" || return "${?}"
+  local socat_lock="/tmp/$(digest "${self}" "${peer}")"
+  local sess_key="$(head -n1 "${socat_lock}")" # Reading sess_key generated during the latest reconnect (Just-In-Time access!)
+  local pairing="$(digest "${self}" "${peer}" "${sess_key:=nil}")"
+  # Substituting "nil" for empty sess_key makes sure that `lock` can't exist if socat_lock is an empty file
+  local lock="/tmp/${pairing}"
+  [[ -e "${lock}" ]] && flock -w 1 "${lock}" "${script_file}" -c pub "${pairing}" "${source}" || return "${?}"
   echo -e "tunnel-connect: ${source} <--> ${self} <--> ${peer}\n" >&2
   local wchan="$(digest "${source}" "${self}" "${peer}")" # Out Stream: Source -> Self -> Peer
   local rchan="$(digest "${peer}" "${self}" "${source}")" # In Stream: Peer -> Self -> Source
@@ -272,6 +278,8 @@ main(){
         "${script_file}" -c server "${arg}" &> "${logfile}" & local pid="${!}" ; disown
         echo -n "tunnel-server: daemon-pid=" >&2
         echo "${pid}"
+        echo -n "tunnel-server: ID-port-tuple=" >&2
+        echo "$(genID):${arg}"
       else
         server "${arg}"
       fi
@@ -282,7 +290,7 @@ main(){
       echo "${local_port}"
       if [[ -v logfile ]]; then
         "${script_file}" -c client "${local_port}" "${arg}" &> "${logfile}" & local pid="${!}" ; disown
-        echo -n "tunnel: client: daemon-pid=" >&2
+        echo -n "tunnel-client: daemon-pid=" >&2
         echo "${pid}"
       else
         client "${local_port}" "${arg}"
