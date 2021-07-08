@@ -79,7 +79,7 @@ client(){
   socat "${TUNNEL_L4}-LISTEN:${self##*:},reuseaddr,fork" \
     EXEC:"${script_file} -c _forward ${self//:/\\:} ${peer//:/\\:} ${sess_key}" &
   local socat_pid="${!}"
-  trap "pkill -P \${BASHPID}; kill -KILL -\${BASHPID}; rm -f \${lock}; return" INT TERM QUIT HUP
+  trap "rm -f \${lock}; pkill -P \${BASHPID}; kill -KILL -\${BASHPID}; return" INT TERM QUIT HUP
   # Below is the keepalive (pinging) loop. Otherwise, an idle `curl https://ppng.io/${pairing}` is dropped by 2m.
   # Failure to ping the server triggers reconnect.
   while sleep 7; do
@@ -157,7 +157,7 @@ update(){
 }; export -f update
 
 version(){
-  echo 0.0.0
+  echo 0.0.1
 }; export -f version
 
 usage(){

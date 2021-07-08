@@ -95,6 +95,8 @@ tunnel -c update
 
 This program is simply an executable `bash` script depending on standard GNU tools including `socat`, `openssl`, `curl`, `mktemp`, `cut`, `awk`,  `sed` , `flock`, `pkill`, `dd`, `xxd`, `base64` etc. that are readily available on standard Linux distros.
 
+If your system lacks any of these tools, and you do not have the `sudo` privilege required to install it from the native package repository (e.g. `sudo apt-get install <package>`), try downloading a [portable binary](https://github.com/ernw/static-toolbox/releases) and install it locally at `${HOME}/.bin`.
+
 # Examples
 
 **<u>*SSH*</u>:**
@@ -155,17 +157,20 @@ At your local machine, use `tunnel` to forward a TCP port to the remote port. Po
 
 # Applications
 
-Connecting to [IPFS](https://docs.ipfs.io/concepts/what-is-ipfs/#decentralization) peers.
+- Connecting to [IPFS](https://docs.ipfs.io/concepts/what-is-ipfs/#decentralization) peers.
 
-P2P chatting, streaming, gaming, screen-sharing, file-sharing, gambling, troubleshooting and what not.
+- P2P chatting, streaming, gaming, screen-sharing, file-sharing, gambling, troubleshooting and what not.
 
-Connecting IOT devices.
+- Connecting IOT devices.
 
-Connecting your workstation with your home-computer or laptop with SSH, [RDP](https://en.wikipedia.org/wiki/Remote_Desktop_Protocol) or [VNC](https://en.wikipedia.org/wiki/Virtual_Network_Computing).
+- Connecting your workstation with your home-computer or laptop with SSH, [RDP](https://en.wikipedia.org/wiki/Remote_Desktop_Protocol) or [VNC](https://en.wikipedia.org/wiki/Virtual_Network_Computing).
 
-[Shell-shovelling](https://en.wikipedia.org/wiki/Shell_shoveling).
+- [Shell-shovelling](https://en.wikipedia.org/wiki/Shell_shoveling).
 
-Beat your firewall with a self-hosted or peer-provided VPN.
+- Beat your firewall with a self-hosted or peer-provided VPN.
+
+- Joining intranet chats (over LAN) from the internet. For example, [BeeBEEP](https://www.beebeep.net/) and [LAN Messenger](https://lanmessenger.github.io/) may be pointed to the local port that has been forwarded to a node inside your office using `tunnel`.
+- Making a local web port publicly accessible: Run `tunnel` at Heroku (for free) and forward the port stored in the environment variable `PORT` to your local port that you want to expose. And you have your public URL as: https://your-app-name.herokuapp.com.
 
 # Security
 
