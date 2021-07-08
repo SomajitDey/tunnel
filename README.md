@@ -157,20 +157,20 @@ At your local machine, use `tunnel` to forward a TCP port to the remote port. Po
 
 # Applications
 
-- Connecting to [IPFS](https://docs.ipfs.io/concepts/what-is-ipfs/#decentralization) peers.
+Below are some random use-cases I could think of for `tunnel`. Broadly speaking, anything that involves NAT/firewall traversal (e.g. WebRTC without TURN) or joining a remote LAN, should find `tunnel` useful. Some of the following ideas are rather sketchy, haven't been tested at all, and may not work, but nonetheless are documented here, at least for the time being, just for the sake of inspiration. If you found any of these useful, or useless, or you have found entirely new applications for `tunnel`, please post at [discussions](https://github.com/SomajitDey/tunnel/discussions). Those cases that I have tested are labelled as "working".
 
-- P2P chatting, streaming, gaming, screen-sharing, file-sharing, gambling, troubleshooting and what not.
-
+- Connecting to [IPFS](https://docs.ipfs.io/concepts/what-is-ipfs/#decentralization) peers (*Working*).
+- P2P chatting, mailing, VoIP, streaming, gaming, screen-sharing, file-sharing, gambling, troubleshooting and what not.
 - Connecting IOT devices.
-
-- Connecting your workstation with your home-computer or laptop with SSH, [RDP](https://en.wikipedia.org/wiki/Remote_Desktop_Protocol) or [VNC](https://en.wikipedia.org/wiki/Virtual_Network_Computing).
-
-- [Shell-shovelling](https://en.wikipedia.org/wiki/Shell_shoveling).
-
+- Connecting your workstation with your home-computer or laptop with SSH (*Working*), [RDP](https://en.wikipedia.org/wiki/Remote_Desktop_Protocol) or [VNC](https://en.wikipedia.org/wiki/Virtual_Network_Computing).
+- [Shell-shovelling](https://en.wikipedia.org/wiki/Shell_shoveling) (*Working*).
 - Beat your firewall with a self-hosted or peer-provided VPN.
-
-- Joining intranet chats (over LAN) from the internet. For example, [BeeBEEP](https://www.beebeep.net/) and [LAN Messenger](https://lanmessenger.github.io/) may be pointed to the local port that has been forwarded to a node inside your office using `tunnel`.
-- Making a local web port publicly accessible: Run `tunnel` at Heroku (for free) and forward the port stored in the environment variable `PORT` to your local port that you want to expose. And you have your public URL as: https://your-app-name.herokuapp.com.
+- Joining intranet office chats (over office LAN) from your home across the internet. For example, [BeeBEEP](https://www.beebeep.net/) and [LAN Messenger](https://lanmessenger.github.io/) may use a local port that has been forwarded to from a node inside your office using `tunnel`.
+- P2P (serverless) audio/video. For example, forward a local TCP/UDP port to peer's localhost and point your p2p client to it.  Ready-made FOSS: [Jami](https://jami.net/), [Jitsi](https://jitsi.org/), [Toxchat](https://tox.chat/) and [Retroshare](https://retroshare.cc/).
+- Serverless remote-control using [Teamviewer](https://community.teamviewer.com/English/kb/articles/4618-can-teamviewer-be-used-within-a-local-network-lan-only) or [Anydesk](https://support.anydesk.com/Settings#Direct_Connection). Forward a local port, say 6000, to peer's local TCP port [5938](https://community.teamviewer.com/English/kb/articles/4139-which-ports-are-used-by-teamviewer) (for TV) and [7070](https://support.anydesk.com/Settings#Local_Port_Listening) (for Anydesk) and use *127.0.0.1:6000* as the *IP:port* tuple of the peer.
+- Making a local (web) port publicly accessible, *a.k.a* reverse-proxy accessible from the internet: Simply run `tunnel` at Heroku (for free) and forward the port stored in the environment variable `PORT` to your local port that you want to expose. And you have your public URL as: https://your-app-name.herokuapp.com.
+- Accessing feed from a remote [IP webcam](https://play.google.com/store/apps/details?id=com.pas.webcam&hl=en_IN&gl=US) using a [universal network camera adapter](http://ip-webcam.appspot.com/): Forward a local port to a remote node that can access the mobile cam over [WLAN](https://en.wikipedia.org/wiki/Wireless_LAN).
+- Streaming with VLC: [Movies and Music](https://www.howtogeek.com/118075/how-to-stream-videos-and-music-over-the-network-using-vlc/), [Webcam](https://forums.tomsguide.com/faq/how-to-stream-videos-over-the-internet-with-vlc.23235/) [[command-line](https://medium.com/@petehouston/streaming-webcam-to-http-using-vlc-dda7259176c9)]. Just connect the server and client using `tunnel`.
 
 # Security
 
@@ -190,7 +190,7 @@ If you so choose, you can also write your own relay to be used by `tunnel` using
 
 # See also
 
-[gsocket](https://github.com/hackerschoice/gsocket) ; [ipfs p2p](https://github.com/ipfs/go-ipfs/blob/master/docs/experimental-features.md#ipfs-p2p) with [circuit-relay enabled](https://gist.github.com/SomajitDey/7c17998825bb105466ef2f9cefdc6d43) ; [go-piping-duplex](https://github.com/nwtgck/go-piping-duplex) ; [pipeto.me](https://pipeto.me) ; [uplink](https://getuplink.de) ; [localhost.run](https://localhost.run/) ; [ngrok](https://ngrok.io) ; [sshreach.me](https://sshreach.me) (*free trial for limited period only*) ; [more](https://gist.github.com/SomajitDey/efd8f449a349bcd918c120f37e67ac00)
+[gsocket](https://github.com/hackerschoice/gsocket) ; [ipfs p2p](https://github.com/ipfs/go-ipfs/blob/master/docs/experimental-features.md#ipfs-p2p) with [circuit-relay enabled](https://gist.github.com/SomajitDey/7c17998825bb105466ef2f9cefdc6d43) ; [go-piping-duplex](https://github.com/nwtgck/go-piping-duplex) ; [pipeto.me](https://pipeto.me) ; [uplink](https://getuplink.de) ; [localhost.run](https://localhost.run/) ; [ngrok](https://ngrok.io) ; [localtunnel](https://github.com/localtunnel/localtunnel) ; [sshreach.me](https://sshreach.me) (*free trial for limited period only*) ; [more](https://gist.github.com/SomajitDey/efd8f449a349bcd918c120f37e67ac00)
 
 **Notes:** 
 
