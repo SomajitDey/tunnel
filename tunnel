@@ -116,9 +116,9 @@ _forward(){
   local self="${1}" peer="${2}"
   local source="${SOCAT_PEERADDR}:${SOCAT_PEERPORT}"
   local socat_lock="/tmp/$(digest "${self}" "${peer}")"
-  local sess_key="$(head -n1 "${socat_lock}")" # Reading sess_key generated during the latest reconnect (Just-In-Time access!)
-  local pairing="$(digest "${self}" "${peer}" "${sess_key:=nil}")"
-  # Substituting "nil" for empty sess_key makes sure that `lock` can't exist if socat_lock is an empty file
+  local sess_key="$(head -n1 "${socat_lock}")" ; [[ -n "${sess_key}" ]] || return 2
+  # Reading sess_key generated during the latest reconnect (Just-In-Time access allowing sess_key to be dynamic!)  
+  local pairing="$(digest "${self}" "${peer}" "${sess_key}")"
   local lock="/tmp/${pairing}"
   [[ -e "${lock}" ]] && flock -w 1 "${lock}" "${script_file}" -c pub "${pairing}" "${source}" || return "${?}"
   echo -e "tunnel-connect: ${source} <--> ${self} <--> ${peer}\n" >&2
