@@ -51,14 +51,14 @@ pub(){
   # Usage: pub <channel> <string>
   local chan="${1}" msg="${2}"
   curl -m 3 -sfSNd "${msg}" "${TUNNEL_RELAY}/${chan}"
-}>/dev/null; export -f pub
+} &>/dev/null; export -f pub
 
 sub(){
   # Brief: Read from given channel
   # Usage: sub <channel>
   local chan="${1}"
   curl -sfSN "${TUNNEL_RELAY}/${chan}"
-}; export -f sub
+} 2>/dev/null; export -f sub
 
 client(){
   # Brief: Set up local port forwarding to peer and keep the connection(s) alive
@@ -68,7 +68,7 @@ client(){
   local sess_key="$(dd if=/dev/urandom count=1 bs=20 2>/dev/null | base64)" # Random 160-bit session key
 
   local -i dial_count=0; echo -en "\ntunnel-client: Dialing...\r"
-  until pub "${peer_addr}" "${self} ${sess_key}" 2>/dev/null;do
+  until pub "${peer_addr}" "${self} ${sess_key}";do
     echo -en "tunnel-client: Dialing...${dial_count}\r"
     ((dial_count++))
   done
@@ -76,7 +76,7 @@ client(){
   echo -e "tunnel-client: Forwarding localhost:${self##*:} to ${peer}. Session-key ${sess_key}\n"
   local pairing="$(digest "${self}" "${peer}" "${sess_key}")"
   local lock="/tmp/${pairing}" socat_lock="/tmp/$(digest "${self}" "${peer}")"
-  socat -L "${socat_lock}" "${TUNNEL_L4}-LISTEN:${self##*:},reuseaddr,fork" \
+  flock -nF "${socat_lock}" socat "${TUNNEL_L4}-LISTEN:${self##*:},reuseaddr,fork" \
     EXEC:"${script_file} -c _forward ${self//:/\\:} ${peer//:/\\:}" &
   trap "rm -f \${socat_lock} \${lock}; pkill -P \${BASHPID}; kill -KILL -\${BASHPID}; return" INT TERM QUIT HUP
 
