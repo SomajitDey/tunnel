@@ -82,10 +82,11 @@ client(){
 
   # Below is the keepalive (pinging) loop. Otherwise, an idle `curl https://ppng.io/${pairing}` is dropped by 2m.
   # Failure to ping the server triggers reconnect (with new sess_key for forward secrecy).
-  until [[ -e "${socat_lock}" ]];do sleep 0.01;done; echo "${sess_key}" > "${socat_lock}"
+  until [[ -e "${socat_lock}" ]];do sleep 0.01;done; touch "${lock}"; echo "${sess_key}" > "${socat_lock}"
   # Wait till socat_lock is created by the background socat, then write sess_key therein for `_forward` to read
   while sleep 7; do
     flock -nE0 "${lock}" "${script_file}" -c pub "${pairing}" "ping" || break
+    # -E0 makes sure loop is never exited due to flock, i.e. when failed to acquire lock
   done && rm -f "${lock}" && client "${@}" # This recursion won't launch socat again thanks to socat_lock
 }>&2; export -f client
 
