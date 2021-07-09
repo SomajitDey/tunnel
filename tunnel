@@ -51,14 +51,14 @@ pub(){
   # Usage: pub <channel> <string>
   local chan="${1}" msg="${2}"
   curl -m 3 -sfSNd "${msg}" "${TUNNEL_RELAY}/${chan}"
-}>/dev/null; export -f pub
+} &>/dev/null; export -f pub
 
 sub(){
   # Brief: Read from given channel
   # Usage: sub <channel>
   local chan="${1}"
   curl -sfSN "${TUNNEL_RELAY}/${chan}"
-}; export -f sub
+} 2>/dev/null; export -f sub
 
 client(){
   # Brief: Set up local port forwarding to peer and keep the connection(s) alive
@@ -68,23 +68,26 @@ client(){
   local sess_key="$(dd if=/dev/urandom count=1 bs=20 2>/dev/null | base64)" # Random 160-bit session key
 
   local -i dial_count=0; echo -en "\ntunnel-client: Dialing...\r"
-  until pub "${peer_addr}" "${self} ${sess_key}" 2>/dev/null;do
+  until pub "${peer_addr}" "${self} ${sess_key}";do
     echo -en "tunnel-client: Dialing...${dial_count}\r"
     ((dial_count++))
   done
 
   echo -e "tunnel-client: Forwarding localhost:${self##*:} to ${peer}. Session-key ${sess_key}\n"
   local pairing="$(digest "${self}" "${peer}" "${sess_key}")"
-  local lock="/tmp/${pairing}"
-  socat "${TUNNEL_L4}-LISTEN:${self##*:},reuseaddr,fork" \
-    EXEC:"${script_file} -c _forward ${self//:/\\:} ${peer//:/\\:} ${sess_key}" &
-  local socat_pid="${!}"
-  trap "pkill -P \${BASHPID}; kill -KILL -\${BASHPID}; rm -f \${lock}; return" INT TERM QUIT HUP
+  local lock="/tmp/${pairing}" socat_lock="/tmp/$(digest "${self}" "${peer}")"
+  flock -nF "${socat_lock}" socat "${TUNNEL_L4}-LISTEN:${self##*:},reuseaddr,fork" \
+    EXEC:"${script_file} -c _forward ${self//:/\\:} ${peer//:/\\:}" &
+  trap "rm -f \${socat_lock} \${lock}; pkill -P \${BASHPID}; kill -KILL -\${BASHPID}; return" INT TERM QUIT HUP
+
   # Below is the keepalive (pinging) loop. Otherwise, an idle `curl https://ppng.io/${pairing}` is dropped by 2m.
-  # Failure to ping the server triggers reconnect.
+  # Failure to ping the server triggers reconnect (with new sess_key for forward secrecy).
+  until [[ -e "${socat_lock}" ]];do sleep 0.01;done; touch "${lock}"; echo "${sess_key}" > "${socat_lock}"
+  # Wait till socat_lock is created by the background socat, then write sess_key therein for `_forward` to read
   while sleep 7; do
     flock -nE0 "${lock}" "${script_file}" -c pub "${pairing}" "ping" || break
-  done && kill "${socat_pid}" && rm -f "${lock}" && client "${@}"
+    # -E0 makes sure loop is never exited due to flock, i.e. when failed to acquire lock
+  done && rm -f "${lock}" && client "${@}" # This recursion won't launch socat again thanks to socat_lock
 }>&2; export -f client
 
 server(){
@@ -95,7 +98,7 @@ server(){
   echo -e "\ntunnel-server: PID=${BASHPID}; Started: $(date)"
   echo "tunnel-server: Listening for incoming connections to localhost:${self##*:}..."
   echo -e "tunnel-server: For peers to connect, share $(command tput smso 2>/dev/null)\"${self}\"$(command tput rmso 2>/dev/null) & your secret key (if any)\n"
-  # Using command with tput above, protects against unavailablity of the tput command 
+  # Using `command` with tput above, protects against unavailablity of the tput command 
   local -i req_count=0
   local buffer loop=true; trap "loop=false; pkill -P \${BASHPID}; return" INT TERM QUIT HUP
   while "${loop}"; do
@@ -109,11 +112,15 @@ server(){
 
 _forward(){
   # Brief: Connection manager for client. Called by function: `client`. Type: subshell proc.
-  # Usage: _forward <self_ID:local_port> <peer_ID:peer_port> <session_key>
-  local self="${1}" peer="${2}" sess_key="${3}"
+  # Usage: _forward <self_ID:local_port> <peer_ID:peer_port>
+  local self="${1}" peer="${2}"
   local source="${SOCAT_PEERADDR}:${SOCAT_PEERPORT}"
+  local socat_lock="/tmp/$(digest "${self}" "${peer}")"
+  local sess_key="$(head -n1 "${socat_lock}")" ; [[ -n "${sess_key}" ]] || return 2
+  # Reading sess_key generated during the latest reconnect (Just-In-Time access allowing sess_key to be dynamic!)  
   local pairing="$(digest "${self}" "${peer}" "${sess_key}")"
-  flock -w 1 "/tmp/${pairing}" "${script_file}" -c pub "${pairing}" "${source}" || return "${?}"
+  local lock="/tmp/${pairing}"
+  [[ -e "${lock}" ]] && flock -w 1 "${lock}" "${script_file}" -c pub "${pairing}" "${source}" || return "${?}"
   echo -e "tunnel-connect: ${source} <--> ${self} <--> ${peer}\n" >&2
   local wchan="$(digest "${source}" "${self}" "${peer}")" # Out Stream: Source -> Self -> Peer
   local rchan="$(digest "${peer}" "${self}" "${source}")" # In Stream: Peer -> Self -> Source
@@ -157,7 +164,7 @@ update(){
 }; export -f update
 
 version(){
-  echo 0.0.0
+  echo 0.0.1
 }; export -f version
 
 usage(){
@@ -230,10 +237,21 @@ install(){
   esac && echo "Installed. Check with command (may need to open a new terminal): tunnel"
 }; export -f install
 
+check_dep(){
+  # Brief: Check if the dependencies are present
+  local -a need dep=( socat curl openssl xxd base64 dd cut awk flock pkill mktemp )
+  local tool
+  for tool in "${dep[@]}";do
+    command -v "${tool}" || need+=($'\n'"  ${tool}")
+  done &>/dev/null
+  if [[ -n "${need[@]}" ]];then 
+    echo "Install these tools first: ${need[@]}"
+    return 1
+  fi
+} >&2; export -f check_dep
+
 main(){
-  command -v socat &>/dev/null || { echo "Install socat first" >&2; exit 1;}
-  command -v curl &>/dev/null || { echo "Install curl first" >&2; exit 1;}
-  command -v openssl &>/dev/null || { echo "Install openssl first" >&2; exit 1;}
+  check_dep || return 1
 
   local opt subcommand logfile local_port
   while getopts k:p:ucl:b:ihv opt; do
@@ -261,6 +279,8 @@ main(){
         "${script_file}" -c server "${arg}" &> "${logfile}" & local pid="${!}" ; disown
         echo -n "tunnel-server: daemon-pid=" >&2
         echo "${pid}"
+        echo -n "tunnel-server: ID-port-tuple=" >&2
+        echo "$(genID):${arg}"
       else
         server "${arg}"
       fi
@@ -271,7 +291,7 @@ main(){
       echo "${local_port}"
       if [[ -v logfile ]]; then
         "${script_file}" -c client "${local_port}" "${arg}" &> "${logfile}" & local pid="${!}" ; disown
-        echo -n "tunnel: client: daemon-pid=" >&2
+        echo -n "tunnel-client: daemon-pid=" >&2
         echo "${pid}"
       else
         client "${local_port}" "${arg}"
