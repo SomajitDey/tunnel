@@ -32,11 +32,18 @@ digest(){
 genID(){
   # Brief: Generate ID unique to localhost and user. Should also work on virtual systems / Heroku dynos.
   # Usage: genID
-  local MAC="$(ip link show eth0 | grep link/ether | awk '{print $2}')"
-  local val="$(sha1 "${MAC}")"
-  local key="$(sha1 "${HOSTNAME}" "${USER}" "${HOME}")"
-  local id="$(hmac "${key}" "${val}" | xxd -r -p | base64)"
-  echo "${id//=/}" # 160 bit hash would always have a single trailing "=" in base64. So get rid of it.
+  case "${ID_mode}" in
+    ipfs)
+      ipfs config Identity.PeerID
+      ;;
+    *)
+      local MAC="$(ip link show eth0 | grep link/ether | awk '{print $2}')"
+      local val="$(sha1 "${MAC}")"
+      local key="$(sha1 "${HOSTNAME}" "${USER}" "${HOME}")"
+      local id="$(hmac "${key}" "${val}" | xxd -r -p | base64)"
+      echo "${id//=/}" # 160 bit hash would always have a single trailing "=" in base64. So get rid of it.
+      ;;
+  esac
 }; export -f genID
 
 duplex(){
@@ -84,7 +91,11 @@ client(){
   # Failure to ping the server triggers reconnect (with new sess_key for forward secrecy).
   until [[ -e "${socat_lock}" ]];do sleep 0.01;done; touch "${lock}"; echo "${sess_key}" > "${socat_lock}"
   # Wait till socat_lock is created by the background socat, then write sess_key therein for `_forward` to read
-  while sleep 7; do
+  while :; do
+    if [[ "${ID_mode}" == ipfs ]]; then 
+      ipfs swarm connect /ip4/127.0.0.1/tcp/${self##*:}/p2p/${peer%%:*} &>/dev/null || break
+    fi
+    sleep 7
     flock -nE0 "${lock}" "${script_file}" -c pub "${pairing}" "ping" || break
     # -E0 makes sure loop is never exited due to flock, i.e. when failed to acquire lock
   done && rm -f "${lock}" && client "${@}" # This recursion won't launch socat again thanks to socat_lock
@@ -250,15 +261,24 @@ check_dep(){
   fi
 } >&2; export -f check_dep
 
+launch_ipfs_daemon(){
+  # Brief: Launch daemon if inactive
+  until ipfs swarm peers &>/dev/null;do
+    ipfs daemon >&2 &
+    sleep 3
+  done
+}; export -f launch_ipfs_daemon
+
 main(){
   check_dep || return 1
 
   local opt subcommand logfile local_port
-  while getopts k:p:ucl:b:ihv opt; do
+  while getopts k:p:ur:cl:b:ihv opt; do
     case "${opt}" in
       k) export TUNNEL_KEY="${OPTARG}";;
       p) export TUNNEL_RELAY="${OPTARG}";;
       u) export TUNNEL_L4="UDP";;
+      r) export IPFS_PATH="${OPTARG}";export ID_mode="ipfs";;
       c) subcommand="set";;
       l) logfile="${OPTARG}";;
       b) local_port="${OPTARG}";;
@@ -274,7 +294,13 @@ main(){
 
   local arg="${1}"
   case "${arg}" in
-    +([[:digit:]]) )
+    +([[:digit:]]) | ipfs )
+      if [[ "${arg}" == ipfs ]]; then
+        export ID_mode="ipfs"
+        launch_ipfs_daemon
+        local swarm_listen="$(ipfs config Addresses.Swarm | grep -o '"/ip4/.*/tcp/[^"]*')"
+        arg="${swarm_listen##*/}"
+      fi
       if [[ -v logfile ]]; then
         "${script_file}" -c server "${arg}" &> "${logfile}" & local pid="${!}" ; disown
         echo -n "tunnel-server: daemon-pid=" >&2
@@ -285,7 +311,12 @@ main(){
         server "${arg}"
       fi
       ;;
-    +([[:alnum:]+/])?(:+([[:digit:]])) )
+    +([[:alnum:]+/])?(:+([[:digit:]])) | +([[:alnum:]]) )
+      if [[ "${arg}" == "${arg##*:}" ]]; then
+        export ID_mode="ipfs"
+        launch_ipfs_daemon
+        arg="${arg}:4001"
+      fi
       local_port="${local_port:-"$(pscan)"}"
       echo -n "tunnel-client: port=" >&2
       echo "${local_port}"
