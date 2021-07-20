@@ -297,9 +297,10 @@ main(){
     +([[:digit:]]) | ipfs )
       if [[ "${arg}" == ipfs ]]; then
         export ID_mode="ipfs"
-        launch_ipfs_daemon
         local swarm_listen="$(ipfs config Addresses.Swarm | grep -o '"/ip4/.*/tcp/[^"]*')"
         arg="${swarm_listen##*/}"
+        ((arg==4001)) || { echo "tunnel-ipfs: Only default tcp port 4001 supported for now. Exiting." >&2; exit 1;}
+        launch_ipfs_daemon
       fi
       if [[ -v logfile ]]; then
         "${script_file}" -c server "${arg}" &> "${logfile}" & local pid="${!}" ; disown
