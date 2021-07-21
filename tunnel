@@ -108,7 +108,11 @@ server(){
   local self_addr="$(digest "${self}" "${TUNNEL_L4}")"
   echo -e "\ntunnel-server: PID=${BASHPID}; Started: $(date)"
   echo "tunnel-server: Listening for incoming connections to localhost:${self##*:}..."
-  echo -e "tunnel-server: For peers to connect, share $(command tput smso 2>/dev/null)\"${self}\"$(command tput rmso 2>/dev/null) & your secret key (if any)\n"
+  if [[ "${ID_mode}" != ipfs ]]; then
+    echo -e "tunnel-server: For peers to connect, share $(command tput smso 2>/dev/null)\"${self}\"$(command tput rmso 2>/dev/null) & your secret key (if any)\n"
+  else
+    echo -e "tunnel-server: For peers to connect, share $(command tput smso 2>/dev/null)\"$(genID)\"$(command tput rmso 2>/dev/null) & your secret key (if any)\n"
+  fi
   # Using `command` with tput above, protects against unavailablity of the tput command 
   local -i req_count=0
   local buffer loop=true; trap "loop=false; pkill -P \${BASHPID}; return" INT TERM QUIT HUP
@@ -184,6 +188,9 @@ usage(){
   Client (Forwarder): tunnel [options] [-b <local-port>] <peer-ID:peer-port>
   Server (Forwardee): tunnel [options] <local-port>
 
+  IPFS-Connectee: tunnel [-r <path-to-ipfs-repo>] [-k <secret>] ipfs
+  IPFS-Connector: tunnel [-r <path-to-ipfs-repo>] [-k <secret>] <IPFS-peer-ID-of-connectee>
+  
   Update: tunnel -c update
   Install locally: tunnel -c install -l
   Install system-wide (sudo priviledge required): tunnel -c install
@@ -218,6 +225,16 @@ usage(){
     # SSH to the above peer
         tunnel -l /dev/null peer_ID:22 # This client will give forwarded local port at stdout
         ssh user@localhost -p port_obtained_from_client
+        
+    # Peer A has a file. He does
+        ipfs add path_to_file # Gives out IPFS hash of file
+        tunnel -k swarm_key ipfs # Exposes ipfs daemon of peer A.
+    
+    # Peer B connects to peer A:
+        tunnel -k swarm_key ipfs-peer-ID-of-A # Auto swarm connect with A in background
+    # In another terminal:  
+        ipfs cat ipfs_hash_of_file # Getting the file peer A added to IPFS
+        
   "
 }; export -f usage
 
@@ -306,8 +323,13 @@ main(){
         "${script_file}" -c server "${arg}" &> "${logfile}" & local pid="${!}" ; disown
         echo -n "tunnel-server: daemon-pid=" >&2
         echo "${pid}"
-        echo -n "tunnel-server: ID-port-tuple=" >&2
-        echo "$(genID):${arg}"
+        if [[ "${ID_mode}" != ipfs ]];then
+          echo -n "tunnel-server: ID-port-tuple=" >&2
+          echo "$(genID):${arg}"
+        else
+          echo -n "tunnel-server: IPFS-Peer-ID=" >&2
+          echo "$(genID)"
+        fi
       else
         server "${arg}"
       fi
