@@ -209,7 +209,7 @@ If you so choose, you can also write your own relay to be used by `tunnel` using
 
 # Future directions
 
-**IPFS:** 
+**IPFS (Done):** 
 
 Connecting to IPFS would be much simpler: 
 
