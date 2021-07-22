@@ -17,6 +17,8 @@ Secure, multiplexed, TCP/UDP port forwarder using [piping-server](https://github
 
 # Command-line
 
+For the special case of **IPFS**, see [#examples](#examples) below.
+
 **<u>ID</u>:** Every node is given a unique ([base64](https://datatracker.ietf.org/doc/html/rfc2045#page-24)) ID -
 
 ```bash
@@ -119,15 +121,22 @@ ssh -l "${login_name}" -p 67868 localhost
 Let peer A has [IPFS-peer-ID](https://docs.libp2p.io/concepts/peer-id/): `12orQmAlphanumeric`. Her IPFS daemon listens at default TCP port 4001. She exposes it with -
 
 ```bash
-tunnel -k "${swarm_key}" 4001
+tunnel -k "${swarm_key}" ipfs
 ```
+
+`swarm_key` is just any secret string peer A may use to control who can swarm connect to her using `tunnel`. 
 
 Peer B now connects with peer A for [file-sharing](https://docs.ipfs.io/concepts/usage-ideas-examples/) or [pubsub](https://github.com/ipfs/go-ipfs/blob/master/docs/experimental-features.md#ipfs-pubsub) or [p2p](https://github.com/ipfs/go-ipfs/blob/master/docs/experimental-features.md#ipfs-p2p) -
 
 ```bash
-port=$(TUNNEL_KEY="${swarm_key}" tunnel -l /dev/null "${peerA_ID}:4001")
-ipfs swarm connect /ip4/127.0.0.1/tcp/${port}/p2p/12orQmAlphanumeric
+tunnel -k "${swarm_key}" 12orQmAlphanumeric
 ```
+
+This last command swarm connects to peer A through the [piping-server relay](https://ppng.io) and keeps on swarm connecting every few seconds in the background to keep the connection alive. 
+
+`tunnel` starts the IPFS daemon in background if not already active.
+
+The path to IPFS repo may be passed with the option `-r`. Otherwise, the environment variable `IPFS_PATH` or the default path `~/.ipfs` is used as usual. Example: `tunnel -r ~/.ipfs -i` gives the IPFS peer ID.
 
 **<u>*Remote Shell*</u>:**
 
@@ -200,7 +209,7 @@ If you so choose, you can also write your own relay to be used by `tunnel` using
 
 # Future directions
 
-**IPFS:** 
+**IPFS (Done):** 
 
 Connecting to IPFS would be much simpler: 
 
