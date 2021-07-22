@@ -179,7 +179,7 @@ update(){
 }; export -f update
 
 version(){
-  echo 0.0.1
+  echo 0.1.0
 }; export -f version
 
 usage(){
@@ -226,12 +226,12 @@ usage(){
         tunnel -l /dev/null peer_ID:22 # This client will give forwarded local port at stdout
         ssh user@localhost -p port_obtained_from_client
         
-    # Peer A has a file. He does
+    # Peer A has a file. He adds it to IPFS:
         ipfs add path_to_file # Gives out IPFS hash of file
         tunnel -k swarm_key ipfs # Exposes ipfs daemon of peer A.
     
-    # Peer B connects to peer A:
-        tunnel -k swarm_key ipfs-peer-ID-of-A # Auto swarm connect with A in background
+    # Peer B connects to peer A over IPFS:
+        tunnel -k swarm_key ipfs_peer_ID_of_A # Auto swarm connect with A in background
     # In another terminal:  
         ipfs cat ipfs_hash_of_file # Getting the file peer A added to IPFS
         
@@ -281,7 +281,7 @@ check_dep(){
 launch_ipfs_daemon(){
   # Brief: Launch daemon if inactive
   until ipfs swarm peers &>/dev/null;do
-    ipfs daemon >&2 &
+    ipfs daemon --enable-pubsub-experiment >&2 &
     sleep 3
   done
 }; export -f launch_ipfs_daemon
