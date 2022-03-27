@@ -36,10 +36,12 @@ tunnel [options] [-u] [-k <shared-secret>] <local-port>
 **<u>Client mode</u>:** Forward your local port to peer's exposed local port -
 
 ```bash
-tunnel [options] [-u] [-k <shared-secret>] [-b <local-port>] <peer-ID:peer-port>
+tunnel [options] [-u] [-k <shared-secret>] [-b <local-port>] [-I <IP>] <peer-ID:peer-port>
 ```
 
 If no local-port is provided using the `-b` option, `tunnel` uses a random unused port. The port used, is always reported at stdout.
+
+The `-I` option is handy when client is running on a laptop that occasionally gets connected to the LAN the server is on. When server can be found on LAN with private IP = `<IP>`, `tunnel` connects through LAN.
 
 Client and server must use the same secret to be able to connect with each other. The secret string may also be passed using the environment variable `TUNNEL_KEY`. Secret passed with `[-k]` takes precedence.
 
