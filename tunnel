@@ -39,7 +39,7 @@ genID(){
       ipfs config Identity.PeerID
       ;;
     *)
-      local MAC="$(ip link show eth0 | grep link/ether | awk '{print $2}')"
+      local MAC="$(cat /sys/class/net/*/address)"
       local val="$(sha1 "${MAC}")"
       local key="$(sha1 "${HOSTNAME}" "${USER}" "${HOME}")"
       local id="$(hmac "${key}" "${val}" | xxd -r -p | base64)"
@@ -189,7 +189,7 @@ update(){
 }; export -f update
 
 version(){
-  echo 0.1.1
+  echo 0.1.2
 }; export -f version
 
 usage(){
