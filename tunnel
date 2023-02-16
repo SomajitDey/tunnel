@@ -42,7 +42,7 @@ genID(){
       local MAC="$(cat /sys/class/net/*/address)"
       local val="$(sha1 "${MAC}")"
       local key="$(sha1 "${HOSTNAME}" "${USER}" "${HOME}")"
-      local id="$(hmac "${key}" "${val}" | xxd -r -p | base64)"
+      local id="$(hmac "${key}" "${val}" | xxd -r -p | base58)"
       echo "${id//=/}" # 160 bit hash would always have a single trailing "=" in base58. So get rid of it.
       ;;
   esac
@@ -74,7 +74,7 @@ client(){
   # Usage: client <local_port> <peer_ID:peer_port>
   local self="$(genID):${1}" peer="${2}"
   local peer_addr="$(digest "${peer}" "${TUNNEL_L4}")"
-  local sess_key="$(dd if=/dev/urandom count=1 bs=20 2>/dev/null | base64)" # Random 160-bit session key
+  local sess_key="$(dd if=/dev/urandom count=1 bs=20 2>/dev/null | base58)" # Random 160-bit session key
 
   local -i dial_count=0; echo -en "\ntunnel-client: Dialing...\r"
   ([[ -n "${TUNNEL_IP}" ]] && timeout 0.1 socat /dev/null "${TUNNEL_L4}:${TUNNEL_IP}:${peer##*:}") || \
@@ -279,7 +279,7 @@ install(){
 
 check_dep(){
   # Brief: Check if the dependencies are present
-  local -a need dep=( socat curl openssl xxd base64 dd cut awk flock pkill mktemp )
+  local -a need dep=( socat curl openssl xxd base58 dd cut awk flock pkill mktemp )
   local tool
   for tool in "${dep[@]}";do
     command -v "${tool}" || need+=($'\n'"  ${tool}")
