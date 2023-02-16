@@ -19,7 +19,7 @@ Secure, multiplexed, TCP/UDP port forwarder using [piping-server](https://github
 
 For the special case of **IPFS**, see [#examples](#examples) below.
 
-**<u>ID</u>:** Every node is given a unique ([base64](https://datatracker.ietf.org/doc/html/rfc2045#page-24)) ID -
+**<u>ID</u>:** Every node is given a unique ([base58](https://github.com/keis/base58)) ID -
 
 ```bash
 tunnel -i
@@ -49,7 +49,7 @@ Client and server must use the same secret to be able to connect with each other
 
 All logs are at stderr by default.
 
-**<u>Options</u>:** 
+**<u>Options</u>:**
 
 ​	**-v**  Version
 
@@ -97,7 +97,7 @@ tunnel -c update
 
 # Dependency/Portability
 
-This program is simply an executable `bash` script depending on standard GNU tools including `socat`, `openssl`, `curl`, `mktemp`, `cut`, `awk`,  `sed` , `flock`, `pkill`, `dd`, `xxd`, `base64` etc. that are readily available on standard Linux distros.
+This program is simply an executable `bash` script depending on standard GNU tools including `socat`, `openssl`, `curl`, `mktemp`, `cut`, `awk`,  `sed` , `flock`, `pkill`, `dd`, `xxd`, `base58` etc. that are readily available on standard Linux distros.
 
 If your system lacks any of these tools, and you do not have the `sudo` privilege required to install it from the native package repository (e.g. `sudo apt-get install <package>`), try downloading a [portable binary](https://github.com/ernw/static-toolbox/releases) and install it locally at `${HOME}/.bin`.
 
@@ -115,7 +115,7 @@ Peer B connects -
 
 ```bash
 tunnel -b 67868 -k "${secret}" -l /dev/null "${peerA_ID}:22" # Daemon due to -l
-ssh -l "${login_name}" -p 67868 localhost 
+ssh -l "${login_name}" -p 67868 localhost
 ```
 
 **<u>*IPFS*</u>:**
@@ -126,7 +126,7 @@ Let peer A has [IPFS-peer-ID](https://docs.libp2p.io/concepts/peer-id/): `12orQm
 tunnel -k "${swarm_key}" ipfs
 ```
 
-`swarm_key` is just any secret string peer A may use to control who can swarm connect to her using `tunnel`. 
+`swarm_key` is just any secret string peer A may use to control who can swarm connect to her using `tunnel`.
 
 Peer B now connects with peer A for [file-sharing](https://docs.ipfs.io/concepts/usage-ideas-examples/) or [pubsub](https://github.com/ipfs/go-ipfs/blob/master/docs/experimental-features.md#ipfs-pubsub) or [p2p](https://github.com/ipfs/go-ipfs/blob/master/docs/experimental-features.md#ipfs-p2p) -
 
@@ -134,7 +134,7 @@ Peer B now connects with peer A for [file-sharing](https://docs.ipfs.io/concepts
 tunnel -k "${swarm_key}" 12orQmAlphanumeric
 ```
 
-This last command swarm connects to peer A through the [piping-server relay](https://ppng.io) and keeps on swarm connecting every few seconds in the background to keep the connection alive. 
+This last command swarm connects to peer A through the [piping-server relay](https://ppng.io) and keeps on swarm connecting every few seconds in the background to keep the connection alive.
 
 `tunnel` starts the IPFS daemon in background if not already active.
 
@@ -147,7 +147,7 @@ Suppose you would regularly need to launch commands at your workplace Linux box 
 At the workplace computer, expose some random local TCP port, e.g. 49090 and connect a shell to that port:
 
 ```bash
-tunnel -l "/tmp/tunnel.log" -k "your secret" 49090 # Note the base64 node id emitted
+tunnel -l "/tmp/tunnel.log" -k "your secret" 49090 # Note the base58 node id emitted
 socat TCP-LISTEN:49090,reuseaddr,fork SYSTEM:'bash 2>&1'
 ```
 
@@ -203,7 +203,7 @@ If you so choose, you can also write your own relay to be used by `tunnel` using
 
 [gsocket](https://github.com/hackerschoice/gsocket) ; [ipfs p2p](https://github.com/ipfs/go-ipfs/blob/master/docs/experimental-features.md#ipfs-p2p) with [circuit-relay enabled](https://gist.github.com/SomajitDey/7c17998825bb105466ef2f9cefdc6d43) ; [go-piping-duplex](https://github.com/nwtgck/go-piping-duplex) ; [pipeto.me](https://pipeto.me) ; [uplink](https://getuplink.de) ; [localhost.run](https://localhost.run/) ; [ngrok](https://ngrok.io) ; [localtunnel](https://github.com/localtunnel/localtunnel) ; [sshreach.me](https://sshreach.me) (*free trial for limited period only*) ; [more](https://gist.github.com/SomajitDey/efd8f449a349bcd918c120f37e67ac00)
 
-**Notes:** 
+**Notes:**
 
 1. Unlike [piping-server](https://github.com/nwtgck/piping-server), most of these do not offer [easy, free self-hosting](https://github.com/nwtgck/piping-server#self-host-on-free-services) of the all-important relay or reverse proxy. If these services ever go down, you are doomed. With `tunnel` and [piping-server](https://github.com/nwtgck/piping-server), however, you can simply deploy your own relay instance, share its public URL with your peers once and for all, `export` the same as `TUNNEL_RELAY` inside `.bashrc` and you are good to go. Also, multiple [public piping-servers](https://github.com/nwtgck/piping-server#public-servers) are available for redundancy.
 2. Some of these services, in the free tier, give a new random public URL for every session, which is problematic for intermittent connectivity (in IOT applications for example). Some free plans also expire sessions after a certain time even if connections are not idling.
@@ -211,11 +211,11 @@ If you so choose, you can also write your own relay to be used by `tunnel` using
 
 # Future directions
 
-**IPFS (Done):** 
+**IPFS (Done):**
 
-Connecting to IPFS would be much simpler: 
+Connecting to IPFS would be much simpler:
 
-`tunnel -k <secret> ipfs` to expose and `tunnel -k <secret> <IPFS_peerID>` to connect. 
+`tunnel -k <secret> ipfs` to expose and `tunnel -k <secret> <IPFS_peerID>` to connect.
 
 These will launch the IPFS daemon on their own, if offline. The latter command will repeatedly swarm connect to the given peer at 30s intervals. The IPFS-peer-ID will be used as the node ID, so peers would no more need to share their node IDs separately. Non-default IPFS repo paths may be passed with option `-r`. or `IPFS_PATH`.
 
@@ -243,11 +243,10 @@ Please report bugs at [issues](https://github.com/SomajitDey/tunnel/issues). Pos
 
 Also feel free to write to me [directly](mailto://hereistitan@gmail.com) about anything regarding this project.
 
-If [this](https://github.com/SomajitDey/tunnel/blob/main/tunnel) little script is of any use to you, a [star](https://github.com/SomajitDey/tunnel/stargazers) would be immensely encouraging for me. 
+If [this](https://github.com/SomajitDey/tunnel/blob/main/tunnel) little script is of any use to you, a [star](https://github.com/SomajitDey/tunnel/stargazers) would be immensely encouraging for me.
 
 Thanks ! :smiley:
 
 ------
 
-###### [Copyright](https://github.com/SomajitDey/tunnel/blob/main/LICENSE) &copy; 2021 [Somajit Dey](https://github.com/SomajitDey)
-
+###### [Copyright](https://github.com/SomajitDey/tunnel/blob/main/LICENSE) &copy; 2021 [Somajit Dey](https://github.com/SomajitDey)

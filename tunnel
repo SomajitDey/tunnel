@@ -43,7 +43,7 @@ genID(){
       local val="$(sha1 "${MAC}")"
       local key="$(sha1 "${HOSTNAME}" "${USER}" "${HOME}")"
       local id="$(hmac "${key}" "${val}" | xxd -r -p | base64)"
-      echo "${id//=/}" # 160 bit hash would always have a single trailing "=" in base64. So get rid of it.
+      echo "${id//=/}" # 160 bit hash would always have a single trailing "=" in base58. So get rid of it.
       ;;
   esac
 }; export -f genID
@@ -95,7 +95,7 @@ client(){
   until [[ -e "${socat_lock}" ]];do sleep 0.01;done; touch "${lock}"; echo "${sess_key}" > "${socat_lock}"
   # Wait till socat_lock is created by the background socat, then write sess_key therein for `_forward` to read
   while :; do
-    if [[ "${ID_mode}" == ipfs ]]; then 
+    if [[ "${ID_mode}" == ipfs ]]; then
       ipfs swarm connect /ip4/127.0.0.1/tcp/${self##*:}/p2p/${peer%%:*} &>/dev/null || break
     fi
     sleep 7
@@ -117,7 +117,7 @@ server(){
   else
     echo -e "tunnel-server: For peers to connect, share $(command tput smso 2>/dev/null)\"$(genID)\"$(command tput rmso 2>/dev/null) & your secret key (if any)\n"
   fi
-  # Using `command` with tput above, protects against unavailablity of the tput command 
+  # Using `command` with tput above, protects against unavailablity of the tput command
   local -i req_count=0
   local buffer loop=true; trap "loop=false; pkill -P \${BASHPID}; return" INT TERM QUIT HUP
   while "${loop}"; do
@@ -141,7 +141,7 @@ _forward(){
   else
   local socat_lock="/tmp/$(digest "${self}" "${peer}")"
   local sess_key="$(head -n1 "${socat_lock}")" ; [[ -n "${sess_key}" ]] || return 2
-  # Reading sess_key generated during the latest reconnect (Just-In-Time access allowing sess_key to be dynamic!)  
+  # Reading sess_key generated during the latest reconnect (Just-In-Time access allowing sess_key to be dynamic!)
   local pairing="$(digest "${self}" "${peer}" "${sess_key}")"
   local lock="/tmp/${pairing}"
   [[ -e "${lock}" ]] && flock -w 1 "${lock}" "${script_file}" -c pub "${pairing}" "${source}" || return "${?}"
@@ -200,11 +200,11 @@ usage(){
 
   IPFS-Connectee: tunnel [-r <path-to-ipfs-repo>] [-k <secret>] ipfs
   IPFS-Connector: tunnel [-r <path-to-ipfs-repo>] [-k <secret>] <IPFS-peer-ID-of-connectee>
-  
+
   Update: tunnel -c update
   Install locally: tunnel -c install -l
   Install system-wide (sudo priviledge required): tunnel -c install
-  
+
   Options:
     -i  ID, bound to hardware (MAC), USER, HOME and HOSTNAME
     -v  Version
@@ -237,16 +237,16 @@ usage(){
     # SSH to the above peer
         tunnel -l /dev/null peer_ID:22 # This client will give forwarded local port at stdout
         ssh user@localhost -p port_obtained_from_client
-        
+
     # Peer A has a file. He adds it to IPFS:
         ipfs add path_to_file # Gives out IPFS hash of file
         tunnel -k swarm_key ipfs # Exposes ipfs daemon of peer A.
-    
+
     # Peer B connects to peer A over IPFS:
         tunnel -k swarm_key ipfs_peer_ID_of_A # Auto swarm connect with A in background
-    # In another terminal:  
+    # In another terminal:
         ipfs cat ipfs_hash_of_file # Getting the file peer A added to IPFS
-        
+
   "
 }; export -f usage
 
@@ -264,14 +264,14 @@ install(){
   # Usage: install [-l]
   local opt OPTIND=1; getopts l opt
   case "${opt}" in
-    l) 
+    l)
       local dest="${HOME}/.bin"
       local cmd="export PATH=\"\${PATH}:${dest}\""
       mkdir -p "${dest}"
       cp -i "${script_file}" "${dest}" &&\
       (grep -q "^${cmd}" "${HOME}/.bashrc" || echo "${cmd}" >> "${HOME}/.bashrc") && eval "${cmd}"
       ;;
-    *) 
+    *)
       sudo cp -i "${script_file}" /usr/local/bin
       ;;
   esac && echo "Installed. Check with command (may need to open a new terminal): tunnel"
@@ -284,7 +284,7 @@ check_dep(){
   for tool in "${dep[@]}";do
     command -v "${tool}" || need+=($'\n'"  ${tool}")
   done &>/dev/null
-  if [[ -n "${need[@]}" ]];then 
+  if [[ -n "${need[@]}" ]];then
     echo "Install these tools first: ${need[@]}"
     return 1
   fi
