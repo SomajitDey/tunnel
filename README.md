@@ -43,25 +43,18 @@ If no local-port is provided using the `-b` option, `tunnel` uses a random unuse
 
 The `-I` option is handy when client is running on a laptop that occasionally gets connected to the LAN the server is on. When server can be found on LAN with private IP = `<IP>`, `tunnel` connects through LAN.
 
-Client and server must use the same secret to be able to connect with each other. The secret string may also be passed using the environment variable `TUNNEL_KEY`. Secret passed with `[-k]` takes precedence.
+Client and server must use the same secret to be able to connect with each other. The secret string may also be passed using the environment variable `TUNNEL_KEY`. Secret passed with `-k` takes precedence.
 
-`[-u]` flag denotes use of UDP instead of the default TCP. If used, it must be used by both the peers.
+`-u` flag denotes use of UDP instead of the default TCP. If used, it must be used by both the peers.
 
-All logs are at stderr by default.
+All logs are at stderr by default. With the `-l <logfile>` option, however, one can launch `tunnel` in background (**<u>daemon mode</u>**) with logs dumped at `<logfile>`. The daemon process ID is shown to the user during launch so that he can kill the daemon anytime with 
+```bash
+tunnel -K <procID>
+```
 
 **<u>Options</u>:** 
 
-​	**-v**  Version
-
-​	**-h**  Help
-
-​	**-p**  *"\<piping-server URL\>*"
-
-​		Can use environment variable `TUNNEL_RELAY` instead. Default: https://ppng.io. See [list](https://github.com/nwtgck/piping-server#public-servers).
-
-​	**-l**   *"\<path to log file\>*"
-
-​		Runs `tunnel` as daemon with stderr redirected to given path.
+​For a full list of options see : `tunnel -h`	
 
 # Installation and Updating
 
@@ -74,7 +67,7 @@ curl -LO https://raw.githubusercontent.com/SomajitDey/tunnel/main/tunnel
 Make it executable:
 
 ```bash
-chmod +x ./tunnel
+chmod +rx ./tunnel
 ```
 
 Then install system-wide with:

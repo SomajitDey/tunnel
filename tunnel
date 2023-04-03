@@ -1,6 +1,17 @@
 #!/usr/bin/env -S bash -O extglob
 # Remark : -k option has been used in curl below to make tunnel run in some old servers (learnt from experience)
 
+kill_proc_tree(){
+  # Brief: Kill (with SIGKILL) all descendants of the process id given
+  local pid
+  for pid in $(pgrep -P "${1}"); do
+    kill_proc_tree "${pid}" &
+  done
+  kill -KILL "${1}" 
+} &>/dev/null; export -f kill_proc_tree
+
+trap "kill_proc_tree $$" INT TERM QUIT HUP
+
 piping_server=https://ppng.io
 
 export TUNNEL_RELAY="${TUNNEL_RELAY:-"${piping_server%/}"}"
@@ -88,7 +99,6 @@ client(){
   local lock="/tmp/${pairing}" socat_lock="/tmp/$(digest "${self}" "${peer}")"
   flock -nF "${socat_lock}" socat "${TUNNEL_L4}-LISTEN:${self##*:},reuseaddr,fork" \
     EXEC:"${script_file} -c _forward ${self//:/\\:} ${peer//:/\\:}" &
-  trap "rm -f \${socat_lock} \${lock}; pkill -P \${BASHPID}; kill -KILL -\${BASHPID}; return" INT TERM QUIT HUP
 
   # Below is the keepalive (pinging) loop. Otherwise, an idle `curl https://ppng.io/${pairing}` is dropped by 2m.
   # Failure to ping the server triggers reconnect (with new sess_key for forward secrecy).
@@ -119,7 +129,7 @@ server(){
   fi
   # Using `command` with tput above, protects against unavailablity of the tput command 
   local -i req_count=0
-  local buffer loop=true; trap "loop=false; pkill -P \${BASHPID}; return" INT TERM QUIT HUP
+  local buffer loop=true
   while "${loop}"; do
     buffer="$(sub "${self_addr}")" || continue
     local peer="${buffer%% *}" sess_key="${buffer##* }"
@@ -157,7 +167,7 @@ _forwardee(){
   # Usage: _forwardee <peer_ID:peer_port> <self_ID:local_port> <session_key>
   local peer="${1}" self="${2}" sess_key="${3}"
   local pairing="$(digest "${peer}" "${self}" "${sess_key}")"
-  local loop=true; trap "loop=false; pkill -P \${BASHPID}; return" INT TERM QUIT HUP
+  local loop=true
   local source
   while "${loop}";do
     source="$(sub "${pairing}")" || return "${?}"
@@ -183,20 +193,20 @@ update(){
   local tmp="$(mktemp /tmp/XXXXX.tunnel.update)" branch="${1:-main}"
   trap "rm -f ${tmp}" return
   curl -k -sfSNL -o "${tmp}" https://raw.githubusercontent.com/SomajitDey/tunnel/"${branch}"/tunnel || return "${?}"
-  chmod +x "${tmp}"
+  chmod +rx "${tmp}"
   mv -f "${tmp}" "${script_file}" 2>/dev/null || sudo mv -f "${tmp}" "${script_file}" &&\
   echo "Updated to v$(${script_file} -v)"
 }; export -f update
 
 version(){
-  echo 0.1.2
+  echo 0.2.0
 }; export -f version
 
 usage(){
   echo "
   About: tunnel
-  Client (Forwarder): tunnel [options] [-b <local-port>] [-I <IP>] <peer-ID:peer-port>
-  Server (Forwardee): tunnel [options] <local-port>
+  Client (Forwarder): tunnel [options] [-k <secret>] [-b <local-port>] [-I <IP>] <peer-ID:peer-port>
+  Server (Forwardee): tunnel [options] [-k <secret>] <local-port>
 
   IPFS-Connectee: tunnel [-r <path-to-ipfs-repo>] [-k <secret>] ipfs
   IPFS-Connector: tunnel [-r <path-to-ipfs-repo>] [-k <secret>] <IPFS-peer-ID-of-connectee>
@@ -206,17 +216,23 @@ usage(){
   Install system-wide (sudo priviledge required): tunnel -c install
   
   Options:
-    -i  ID, bound to hardware (MAC), USER, HOME and HOSTNAME
-    -v  Version
-    -u  UDP instead of the default TCP. If client uses this option, server must use it too and vice versa.
-    -h  Help
-    -l  Use <logfile> instead of default stderr. This makes the client/server run as daemon.
-    -b  Forward given <local_port>. If absent, client uses a random, unused port. Port used is shown at stdout.
-    -k  Authorize with <access-key>. Can use environment variable TUNNEL_KEY instead.
-    -p  Choose <piping-server> as the relay. Can use environment variable TUNNEL_RELAY instead.
-    -I  If <IP>:<peer-port> is available, connect directly, without going through TUNNEL_RELAY. This option is
-        handy when client is running on a laptop that occasionally gets connected to the LAN the server is on.
-        When server can be found on LAN, tunnel connects through LAN.
+  
+  -b <local-port>     Forward <local-port>. If absent, forwards a random, unused port shown at stdout.
+  -h                  Help
+  -i                  ID, bound to hardware (MAC), USER, HOME and HOSTNAME
+
+  -I <IP>             If <IP>:<peer-port> is available, connect directly, without going through TUNNEL_RELAY.
+                      This option comes handy when the client-host (e.g. laptop) occasionally gets connected
+                      to the LAN the server is on. When server is found on LAN, client connects through LAN.
+
+  -k <secret>         Authorize with <secret> string. Can use environment variable TUNNEL_KEY instead.
+  -K <PID>            Kill tunnel daemon with process id = <PID>.
+  -l <logfile>        Use <logfile> instead of default stderr. This makes the client/server run as daemon.
+  -p <piping-server>  Choose <piping-server> as the relay. Can use environment variable TUNNEL_RELAY instead.
+  -r <path-to-ipfs-repo> Pass path to IPFS repository
+  -u                  UDP instead of the default TCP. If server uses this option,client must use it too.
+  -v                  Version
+
   Examples:
 
     # Generate node ID to be announced to peers
@@ -302,8 +318,9 @@ main(){
   check_dep || return 1
 
   local opt subcommand logfile local_port
-  while getopts k:p:uI:r:cl:b:ihv opt; do
+  while getopts K:k:p:uI:r:cl:b:ihv opt; do
     case "${opt}" in
+      K) kill_proc_tree "${OPTARG}" ; exit;;
       k) export TUNNEL_KEY="${OPTARG}";;
       p) export TUNNEL_RELAY="${OPTARG}";;
       u) export TUNNEL_L4="UDP";;
@@ -333,8 +350,8 @@ main(){
         launch_ipfs_daemon
       fi
       if [[ -v logfile ]]; then
-        "${script_file}" -c server "${arg}" &> "${logfile}" & local pid="${!}" ; disown
-        echo -n "tunnel-server: daemon-pid=" >&2
+        server "${arg}" &> "${logfile}" & local pid="${!}" ; disown
+        echo -n "tunnel-server: daemon-PID=" >&2
         echo "${pid}"
         if [[ "${ID_mode}" != ipfs ]];then
           echo -n "tunnel-server: ID-port-tuple=" >&2
@@ -357,8 +374,8 @@ main(){
       echo -n "tunnel-client: port=" >&2
       echo "${local_port}"
       if [[ -v logfile ]]; then
-        "${script_file}" -c client "${local_port}" "${arg}" &> "${logfile}" & local pid="${!}" ; disown
-        echo -n "tunnel-client: daemon-pid=" >&2
+        client "${local_port}" "${arg}" &> "${logfile}" & local pid="${!}" ; disown
+        echo -n "tunnel-client: daemon-PID=" >&2
         echo "${pid}"
       else
         client "${local_port}" "${arg}"
