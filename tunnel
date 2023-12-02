@@ -1,4 +1,5 @@
-#!/usr/bin/env -S bash -O extglob
+#!/usr/bin/env bash
+shopt -s extglob
 # Remark : -k option has been used in curl below to make tunnel run in some old servers (learnt from experience)
 
 kill_proc_tree(){
@@ -98,7 +99,7 @@ client(){
   local pairing="$(digest "${self}" "${peer}" "${sess_key}")"
   local lock="/tmp/${pairing}" socat_lock="/tmp/$(digest "${self}" "${peer}")"
   flock -nF "${socat_lock}" socat "${TUNNEL_L4}-LISTEN:${self##*:},reuseaddr,fork" \
-    EXEC:"${script_file} -c _forward ${self//:/\\:} ${peer//:/\\:}" &
+    SYSTEM:"${script_file} -c _forward ${self//:/\\:} ${peer//:/\\:}" &
 
   # Below is the keepalive (pinging) loop. Otherwise, an idle `curl https://ppng.io/${pairing}` is dropped by 2m.
   # Failure to ping the server triggers reconnect (with new sess_key for forward secrecy).
@@ -110,8 +111,8 @@ client(){
     fi
     sleep 7
     ([[ -n "${TUNNEL_IP}" ]] && timeout 0.1 socat /dev/null "${TUNNEL_L4}:${TUNNEL_IP}:${peer##*:}") || \
-    flock -nE0 "${lock}" "${script_file}" -c pub "${pairing}" "ping" || break
-    # -E0 makes sure loop is never exited due to flock, i.e. when failed to acquire lock
+    (flock -n 3 || exit 0; pub "${pairing}" "ping")3<"${lock}" || break
+    # exit 0 above makes sure loop is never exited due to flock, i.e. when it fails to acquire lock. Like: flock -nE0 <cmd>.
   done && rm -f "${lock}" && client "${@}" # This recursion won't launch socat again thanks to socat_lock
 }>&2; export -f client
 
@@ -154,7 +155,7 @@ _forward(){
   # Reading sess_key generated during the latest reconnect (Just-In-Time access allowing sess_key to be dynamic!)  
   local pairing="$(digest "${self}" "${peer}" "${sess_key}")"
   local lock="/tmp/${pairing}"
-  [[ -e "${lock}" ]] && flock -w 1 "${lock}" "${script_file}" -c pub "${pairing}" "${source}" || return "${?}"
+  (flock -w 1 3 && pub "${pairing}" "${source}")3<"${lock}" || return "${?}"
   echo -e "tunnel-connect: ${source} <--> ${self} <--> ${peer}\n" >&2
   local wchan="$(digest "${source}" "${self}" "${peer}")" # Out Stream: Source -> Self -> Peer
   local rchan="$(digest "${peer}" "${self}" "${source}")" # In Stream: Peer -> Self -> Source
@@ -174,7 +175,7 @@ _forwardee(){
     [[ "${source}" != "ping" ]] || continue
     local rchan="$(digest "${source}" "${peer}" "${self}")" # In Stream: Source -> Peer -> Self
     local wchan="$(digest "${self}" "${peer}" "${source}")" # Out Stream: Self -> Peer-> Source
-    socat "EXEC:${script_file} -c duplex ${rchan} ${wchan}" "${TUNNEL_L4}:localhost:${self##*:}" &
+    socat "SYSTEM:${script_file} -c duplex ${rchan} ${wchan}" "${TUNNEL_L4}:localhost:${self##*:}" &
     echo -e "tunnel-connect: ${source} <--> ${peer} <--> ${self}\nsocat-PID: ${!}\n"
   done
 }>&2; export -f _forwardee
@@ -199,7 +200,7 @@ update(){
 }; export -f update
 
 version(){
-  echo 0.2.0
+  echo 0.2.1
 }; export -f version
 
 usage(){
