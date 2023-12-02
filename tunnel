@@ -97,7 +97,9 @@ client(){
 
   echo -e "tunnel-client: Forwarding localhost:${self##*:} to ${peer}. Session-key ${sess_key}\n"
   local pairing="$(digest "${self}" "${peer}" "${sess_key}")"
-  local lock="/tmp/${pairing}" socat_lock="/tmp/$(digest "${self}" "${peer}")"
+  local socat_lock="/tmp/tunnel_$(digest "${self}" "${peer}")"
+  local lock="${socat_lock}_${pairing}"
+  rm -f "${socat_lock}_"* # Remove stale locks, if any
   flock -nF "${socat_lock}" socat "${TUNNEL_L4}-LISTEN:${self##*:},reuseaddr,fork" \
     SYSTEM:"${script_file} -c _forward ${self//:/\\:} ${peer//:/\\:}" &
 
@@ -150,11 +152,11 @@ _forward(){
     echo -e "tunnel-connect: ${source} <--> ${self} <--> ${TUNNEL_IP}:${peer_port}\n" >&2
     socat STDIO "${TUNNEL_L4}:${TUNNEL_IP}:${peer_port}"
   else
-  local socat_lock="/tmp/$(digest "${self}" "${peer}")"
+  local socat_lock="/tmp/tunnel_$(digest "${self}" "${peer}")"
   local sess_key="$(head -n1 "${socat_lock}")" ; [[ -n "${sess_key}" ]] || return 2
   # Reading sess_key generated during the latest reconnect (Just-In-Time access allowing sess_key to be dynamic!)  
   local pairing="$(digest "${self}" "${peer}" "${sess_key}")"
-  local lock="/tmp/${pairing}"
+  local lock="${socat_lock}_${pairing}"
   (flock -w 1 3 && pub "${pairing}" "${source}")3<"${lock}" || return "${?}"
   echo -e "tunnel-connect: ${source} <--> ${self} <--> ${peer}\n" >&2
   local wchan="$(digest "${source}" "${self}" "${peer}")" # Out Stream: Source -> Self -> Peer
@@ -200,7 +202,7 @@ update(){
 }; export -f update
 
 version(){
-  echo 0.2.1
+  echo 0.2.2
 }; export -f version
 
 usage(){
