@@ -190,9 +190,10 @@ _forwardee(){
 
 pscan(){
   # Brief: Give an unused, random, local TCP/UDP port for the client to listen to
+  #TODO: Add timeout for if stuck
   local port
   for port in $(seq 49152 65535 | tac);do
-    socat "${TUNNEL_L4}:localhost:${port}" "SYSTEM:echo data" &>/dev/null || { echo "${port}" && return 0;}
+    socat -t 0.1 /dev/null "${TUNNEL_L4}:localhost:${port}" &>/dev/null || { echo "${port}" && return 0;}
   done
   return 1
 }; export -f pscan
