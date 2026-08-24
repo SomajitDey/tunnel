@@ -13,7 +13,7 @@ kill_proc_tree(){
 
 trap "kill_proc_tree $$" INT TERM QUIT HUP
 
-piping_server=https://ppng.io
+piping_server='http://ppng.io' # We will use E2EE below. So https is superfluous.
 
 export TUNNEL_RELAY="${TUNNEL_RELAY:-"${piping_server%/}"}"
 export TUNNEL_L4="${TUNNEL_L4:-TCP}" # L4 stands for Layer 4 (Transport Layer) of the OSI model (i.e. TCP/UDP)
@@ -46,16 +46,22 @@ digest(){
 genID(){
   # Brief: Generate ID unique to localhost and user. Should also work on virtual systems / Heroku dynos.
   # Usage: genID
+  #TODO: REWRITE
+
+  local identity_file="${HOME}/.tunnel/age-identity.txt"
+
   case "${ID_mode}" in
     ipfs)
       ipfs config Identity.PeerID
       ;;
     *)
-      local MAC="$(cat /sys/class/net/*/address)"
-      local val="$(sha1 "${MAC}")"
-      local key="$(sha1 "${HOSTNAME}" "${USER}" "${HOME}")"
-      local id="$(hmac "${key}" "${val}" | xxd -r -p | base64)"
-      echo "${id//=/}" # 160 bit hash would always have a single trailing "=" in base64. So get rid of it.
+      if [ -f "${identity_file}" ]; then
+        age-keygen -y "${identity_file}"
+      else
+        mkdir -p "${identity_file%/*}"; chmod 700 "${identity_file%/*}"
+        age-keygen -o "${identity_file}" |& cut -d ' ' -f 3
+        chmod 600 "${identity_file}"
+      fi
       ;;
   esac
 }; export -f genID
@@ -202,7 +208,7 @@ update(){
 }; export -f update
 
 version(){
-  echo 0.2.2
+  echo 0.3.0
 }; export -f version
 
 usage(){
@@ -298,7 +304,7 @@ install(){
 
 check_dep(){
   # Brief: Check if the dependencies are present
-  local -a need dep=( socat curl openssl xxd base64 dd cut awk flock pkill mktemp )
+  local -a need dep=( socat curl openssl xxd base64 dd cut flock pkill mktemp age uuidgen stunnel sslh )
   local tool
   for tool in "${dep[@]}";do
     command -v "${tool}" || need+=($'\n'"  ${tool}")
