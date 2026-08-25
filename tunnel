@@ -69,7 +69,10 @@ duplex(){
   # Usage: duplex <read channel> <write channel>
   local rchan="${1}" wchan="${2}"
   #TODO: Use small keepalive-time for curl. Also use --keepalive flag.
-  socat STDIO "EXEC:curl -k -sfSN ${TUNNEL_RELAY//:/\\:}/${rchan}!!EXEC:curl -k -sfSNT- -o /dev/null ${TUNNEL_RELAY//:/\\:}/${wchan}"
+  socat STDIO \
+"EXEC:curl -k -sfSN ${TUNNEL_RELAY//:/\\:}/${rchan}\
+!!\
+EXEC:curl -k -sfSNT- -o /dev/null ${TUNNEL_RELAY//:/\\:}/${wchan}"
 }; export -f duplex
 
 pub(){
@@ -119,7 +122,7 @@ client(){
       ipfs swarm connect /ip4/127.0.0.1/tcp/${self##*:}/p2p/${peer%%:*} &>/dev/null || break
     fi
     sleep 7
-    ([[ -n "${TUNNEL_IP}" ]] && timeout 0.1 socat /dev/null "${TUNNEL_L4}:${TUNNEL_IP}:${peer##*:}") || \
+    ([[ -n "${TUNNEL_IP}" ]] && socat -u -t 0.1 /dev/null "${TUNNEL_L4}:${TUNNEL_IP}:${peer##*:}") || \
     (flock -n 3 || exit 0; pub "${pairing}" "ping")3<"${lock}" || break
     # exit 0 above makes sure loop is never exited due to flock, i.e. when it fails to acquire lock. Like: flock -nE0 <cmd>.
   done && rm -f "${lock}" && client "${@}" # This recursion won't launch socat again thanks to socat_lock
@@ -143,7 +146,7 @@ server(){
   local -i req_count=0
   local buffer loop=true
   while "${loop}"; do
-    buffer="$(sub "${self_addr}" | age -d -i "${TUNNEL_IDENTITY_FILE}")" || continue
+    buffer="$(sub "${self_addr}" | age -d -i "${TUNNEL_IDENTITY_FILE}" 2>/dev/null)" || continue
     local peer="${buffer%% *}" sess_key="${buffer##* }"
     _forwardee "${peer}" "${self}" "${sess_key}" &
     echo -e "tunnel-request [#${req_count}]: (From) ${peer} (Session-Key) ${sess_key} (Handler-PID) ${!}\n"
@@ -213,7 +216,7 @@ update(){
 }; export -f update
 
 version(){
-  echo 0.3.0
+  echo 1.0.0
 }; export -f version
 
 usage(){
