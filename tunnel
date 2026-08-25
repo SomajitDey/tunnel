@@ -15,6 +15,7 @@ trap "kill_proc_tree $$" INT TERM QUIT HUP
 
 piping_server='http://ppng.io' # We will use E2EE below. So https is superfluous.
 
+export TUNNEL_IDENTITY_FILE="${HOME}/.tunnel/age-identity.txt"
 export TUNNEL_RELAY="${TUNNEL_RELAY:-"${piping_server%/}"}"
 export TUNNEL_L4="${TUNNEL_L4:-TCP}" # L4 stands for Layer 4 (Transport Layer) of the OSI model (i.e. TCP/UDP)
 export script_file="${BASH_SOURCE}"
@@ -47,20 +48,17 @@ genID(){
   # Brief: Generate ID unique to localhost and user. Should also work on virtual systems / Heroku dynos.
   # Usage: genID
   #TODO: REWRITE
-
-  local identity_file="${HOME}/.tunnel/age-identity.txt"
-
   case "${ID_mode}" in
     ipfs)
       ipfs config Identity.PeerID
       ;;
     *)
-      if [ -f "${identity_file}" ]; then
-        age-keygen -y "${identity_file}"
+      if [ -f "${TUNNEL_IDENTITY_FILE}" ]; then
+        age-keygen -y "${TUNNEL_IDENTITY_FILE}"
       else
-        mkdir -p "${identity_file%/*}"; chmod 700 "${identity_file%/*}"
-        age-keygen -o "${identity_file}" |& cut -d ' ' -f 3
-        chmod 600 "${identity_file}"
+        mkdir -p "${TUNNEL_IDENTITY_FILE%/*}"; chmod 700 "${TUNNEL_IDENTITY_FILE%/*}"
+        age-keygen -o "${TUNNEL_IDENTITY_FILE}" |& cut -d ' ' -f 3
+        chmod 600 "${TUNNEL_IDENTITY_FILE}"
       fi
       ;;
   esac
@@ -70,6 +68,7 @@ duplex(){
   # Brief: Create duplex (bi-directional) connection to given channels
   # Usage: duplex <read channel> <write channel>
   local rchan="${1}" wchan="${2}"
+  #TODO: Use small keepalive-time for curl. Also use --keepalive flag.
   socat STDIO "EXEC:curl -k -sfSN ${TUNNEL_RELAY//:/\\:}/${rchan}!!EXEC:curl -k -sfSNT- -o /dev/null ${TUNNEL_RELAY//:/\\:}/${wchan}"
 }; export -f duplex
 
@@ -93,10 +92,12 @@ client(){
   local self="$(genID):${1}" peer="${2}"
   local peer_addr="$(digest "${peer}" "${TUNNEL_L4}")"
   local sess_key="$(uuidgen)" # Random session key
+  local sess_payload
+  sess_payload="$(age -e -r "${peer%%:*}" -a <<<"${self} ${sess_key}")" || return 1
 
   local -i dial_count=0; echo -en "\ntunnel-client: Dialing...\r"
-  ([[ -n "${TUNNEL_IP}" ]] && timeout 0.1 socat /dev/null "${TUNNEL_L4}:${TUNNEL_IP}:${peer##*:}") || \
-  until pub "${peer_addr}" "${self} ${sess_key}";do
+  ([[ -n "${TUNNEL_IP}" ]] && socat -u -t 0.1 /dev/null "${TUNNEL_L4}:${TUNNEL_IP}:${peer##*:}") || \
+  until pub "${peer_addr}" "${sess_payload}";do
     echo -en "tunnel-client: Dialing...${dial_count}\r"
     ((dial_count++))
   done
@@ -129,18 +130,20 @@ server(){
   # Usage server <local_port>
   local self="$(genID):${1}"
   local self_addr="$(digest "${self}" "${TUNNEL_L4}")"
-  echo -e "\ntunnel-server: PID=${BASHPID}; Started: $(date)"
-  echo "tunnel-server: Listening for incoming connections to localhost:${self##*:}..."
+  echo -e "tunnel-server: PID=${BASHPID}; Started: $(date)\n"
+  echo -e "tunnel-server: Listening for incoming connections to localhost:${self##*:}...\n"
   if [[ "${ID_mode}" != ipfs ]]; then
-    echo -e "tunnel-server: For peers to connect, share $(command tput smso 2>/dev/null)\"${self}\"$(command tput rmso 2>/dev/null) & your secret key (if any)\n"
+    echo -e "tunnel-server: For peers to connect, share\n$(command tput smso 2>/dev/null)\"${self}\"$(command tput rmso 2>/dev/null)\n& your secret key (if any)\n"
+    echo -e "tunnel-server: Also make sure you and your peer are using the same major version of tunnel\n"
   else
-    echo -e "tunnel-server: For peers to connect, share $(command tput smso 2>/dev/null)\"$(genID)\"$(command tput rmso 2>/dev/null) & your secret key (if any)\n"
+    echo -e "tunnel-server: For peers to connect, share\n$(command tput smso 2>/dev/null)\"$(genID)\"$(command tput rmso 2>/dev/null)\n& your secret key (if any)\n"
+    echo -e "tunnel-server: Also make sure you and your peer are using the same major version of tunnel\n"
   fi
   # Using `command` with tput above, protects against unavailablity of the tput command 
   local -i req_count=0
   local buffer loop=true
   while "${loop}"; do
-    buffer="$(sub "${self_addr}")" || continue
+    buffer="$(sub "${self_addr}" | age -d -i "${TUNNEL_IDENTITY_FILE}")" || continue
     local peer="${buffer%% *}" sess_key="${buffer##* }"
     _forwardee "${peer}" "${self}" "${sess_key}" &
     echo -e "tunnel-request [#${req_count}]: (From) ${peer} (Session-Key) ${sess_key} (Handler-PID) ${!}\n"
@@ -154,7 +157,7 @@ _forward(){
   local self="${1}" peer="${2}"
   local peer_port="${peer##*:}"
   local source="${SOCAT_PEERADDR}:${SOCAT_PEERPORT}"
-  if [[ -n "${TUNNEL_IP}" ]] && timeout 0.1 socat /dev/null "${TUNNEL_L4}:${TUNNEL_IP}:${peer_port}"; then # Checks if ${TUNNEL_IP}:${peer_port} is listening
+  if [[ -n "${TUNNEL_IP}" ]] && socat -u -t 0.1 /dev/null "${TUNNEL_L4}:${TUNNEL_IP}:${peer_port}"; then # Checks if ${TUNNEL_IP}:${peer_port} is listening
     echo -e "tunnel-connect: ${source} <--> ${self} <--> ${TUNNEL_IP}:${peer_port}\n" >&2
     socat STDIO "${TUNNEL_L4}:${TUNNEL_IP}:${peer_port}"
   else
@@ -165,8 +168,8 @@ _forward(){
   local lock="${socat_lock}_${pairing}"
   (flock -w 1 3 && pub "${pairing}" "${source}")3<"${lock}" || return "${?}"
   echo -e "tunnel-connect: ${source} <--> ${self} <--> ${peer}\n" >&2
-  local wchan="$(digest "${source}" "${self}" "${peer}")" # Out Stream: Source -> Self -> Peer
-  local rchan="$(digest "${peer}" "${self}" "${source}")" # In Stream: Peer -> Self -> Source
+  local wchan="$(digest "${source}" "${self}" "${peer}" "${sess_key}")" # Out Stream: Source -> Self -> Peer
+  local rchan="$(digest "${peer}" "${self}" "${source}" "${sess_key}")" # In Stream: Peer -> Self -> Source
   duplex "${rchan}" "${wchan}"
   fi
 }; export -f _forward
@@ -181,8 +184,8 @@ _forwardee(){
   while "${loop}";do
     source="$(sub "${pairing}")" || return "${?}"
     [[ "${source}" != "ping" ]] || continue
-    local rchan="$(digest "${source}" "${peer}" "${self}")" # In Stream: Source -> Peer -> Self
-    local wchan="$(digest "${self}" "${peer}" "${source}")" # Out Stream: Self -> Peer-> Source
+    local rchan="$(digest "${source}" "${peer}" "${self}" "${sess_key}")" # In Stream: Source -> Peer -> Self
+    local wchan="$(digest "${self}" "${peer}" "${source}" "${sess_key}")" # Out Stream: Self -> Peer-> Source
     socat "SYSTEM:${script_file} -c duplex ${rchan} ${wchan}" "${TUNNEL_L4}:localhost:${self##*:}" &
     echo -e "tunnel-connect: ${source} <--> ${peer} <--> ${self}\nsocat-PID: ${!}\n"
   done
@@ -193,7 +196,7 @@ pscan(){
   #TODO: Add timeout for if stuck
   local port
   for port in $(seq 49152 65535 | tac);do
-    socat -t 0.1 /dev/null "${TUNNEL_L4}:localhost:${port}" &>/dev/null || { echo "${port}" && return 0;}
+    socat -u -t 0.1 /dev/null "${TUNNEL_L4}:localhost:${port}" &>/dev/null || { echo "${port}" && return 0;}
   done
   return 1
 }; export -f pscan
@@ -305,7 +308,7 @@ install(){
 
 check_dep(){
   # Brief: Check if the dependencies are present
-  local -a need dep=( socat curl openssl xxd cut flock pkill mktemp age uuidgen stunnel sslh )
+  local -a need dep=( socat curl openssl xxd cut flock pkill mktemp age uuidgen stunnel sslh haproxy )
   local tool
   for tool in "${dep[@]}";do
     command -v "${tool}" || need+=($'\n'"  ${tool}")

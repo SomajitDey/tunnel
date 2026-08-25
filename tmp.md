@@ -152,3 +152,44 @@ get_local_ip() {
 ACTIVE_IP=$(get_local_ip)
 echo "Active local routing IP: ${ACTIVE_IP}"
 ```
+
+Yes, HAProxy will multiplex them through a single HTTP/2 TCP connection to ppng.io—but ONLY if you configure your backend reuse policy explicitly. [1] 
+If you just write a default HAProxy configuration, it will fail to do this.
+Understanding how HAProxy maps incoming requests to a multiplexed HTTP/2 backend clarifies the exact settings required:
+## 1. The Concurrent Batch (N Parallel curls)
+When you fire a batch of curl commands at the same time:
+
+* 
+* Each curl process opens its own independent, plain HTTP/1.1 TCP connection to your local HAProxy frontend.
+* HAProxy receives N separate frontend TCP connections simultaneously.
+* 
+
+## 2. How HAProxy Maps Them to the Backend (ppng.io)
+By default, HAProxy treats backend connections conservatively. To force HAProxy to bundle all those independent frontend requests into one single, shared HTTP/2 connection to ppng.io, you must explicitly configure connection pooling and reuse in your backend. [1, 2] 
+You need to add two lines (alpn h2 and http-reuse always) to your config:
+
+backend ppng_backend
+    mode http
+    # 'http-reuse always' forces HAProxy to aggressively share open connections across different clients
+    http-reuse always
+    
+    # 'alpn h2' tells HAProxy to negotiate HTTP/2 with ppng.io over TLS
+    server ppng_server ppng.io:443 ssl verify required ca-file /etc/ssl/certs/ca-certificates.crt alpn h2
+
+## What Happens With This Configuration:
+
+* 
+* For the Parallel Batch: The first curl request hitting HAProxy causes it to open a single TCP/TLS connection to ppng.io and negotiate HTTP/2. While that connection is open, the other N-1 parallel curl requests hitting your frontend are instantly assigned their own unique Stream IDs and packed into that exact same backend TCP pipeline. [2, 3] 
+* For Sequential Requests: If curl commands are executed one after the other, http-reuse always keeps the backend HTTP/2 connection idling in an "orphan connection pool". When the next sequential curl command hits HAProxy, it reuses that same warm TCP stream, sending the data over a new Stream ID without executing a new TLS handshake. [1, 2, 4] 
+* 
+
+## Summary
+Without http-reuse always, HAProxy will lazily spin up a new backend TCP connection for every incoming client connection. [5, 6] 
+With http-reuse always and alpn h2, HAProxy functions exactly as an upgrade relay: it converts N independent, unencrypted HTTP/1.1 frontend connections into N multiplexed HTTP/2 binary streams over a single, secure TCP pipeline to ppng.io. [1, 2] 
+
+[1] [https://www.haproxy.com](https://www.haproxy.com/blog/http-keep-alive-pipelining-multiplexing-and-connection-pooling)
+[2] [https://docs.haproxy.org](https://docs.haproxy.org/2.0/configuration.html)
+[3] [https://andreaskaris.github.io](https://andreaskaris.github.io/blog/networking/haproxy-and-h2c/)
+[4] [https://discourse.haproxy.org](https://discourse.haproxy.org/t/haproxy-http-reuse-never-option-not-working-for-haproxy-1-9-8-and-2-0-1/4001?page=2)
+[5] [https://github.com](https://github.com/haproxy/haproxy/issues/1442)
+[6] [https://www.haproxy.com](https://www.haproxy.com/glossary/what-is-connection-reuse)
