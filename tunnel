@@ -1,4 +1,15 @@
 #!/usr/bin/env bash
+
+# Brief: This self-contained bash script contains all necessary code for the "tunnel" CLI.
+# Remarks: Make it executable and run it to see what it's about and its usage instructions.
+# Source: https://github.com/SomajitDey/tunnel/
+
+#TODO: Make E2EE using `stunnel` with PSKsecrets
+#TODO: Use `haproxy` for pooling connections to piping-server (also HTTP/2 multiplexing and TLS)
+#TODO: Remove `ipfs` support in favor of protocol demuxer `sslh` and `SOCKS5` behind it at the server
+#TODO: Let server detect and send its local IP to client peer to check for direct connectivity
+#TODO: Deprecate UDP support. Naive UDP over TCP is disaster
+
 shopt -s extglob
 # Remark : -k option has been used in curl below to make tunnel run in some old servers (learnt from experience)
 
@@ -13,14 +24,33 @@ kill_proc_tree(){
 
 trap "kill_proc_tree $$" INT TERM QUIT HUP
 
-piping_server='http://ppng.io' # We will use E2EE below. So https is superfluous.
+piping_server='https://ppng.io' # Even when we use E2EE, https may be needed to fool firewalls
 
-export TUNNEL_IDENTITY_FILE="${HOME}/.tunnel/age-identity.txt"
 export TUNNEL_RELAY="${TUNNEL_RELAY:-"${piping_server%/}"}"
 export TUNNEL_L4="${TUNNEL_L4:-TCP}" # L4 stands for Layer 4 (Transport Layer) of the OSI model (i.e. TCP/UDP)
 export script_file="${BASH_SOURCE}"
 export PATH="${PATH}:${script_file%/*}" # So that portable socat installed locally at ~/.bin with tunnel becomes accessible by anyone who doesn't source ~/.bashrc. Handy for crontab execution by root.
 export script_call="${0}"
+
+export TUNNEL_IDENTITY_FILE="${HOME}/.tunnel/age-identity.txt" # Home of the private key
+genID(){
+  # Brief: Generate ID. ID is basically the public key of an `age` key-pair.
+  # Usage: genID
+  case "${ID_mode}" in
+    ipfs)
+      ipfs config Identity.PeerID
+      ;;
+    *)
+      if [ -f "${TUNNEL_IDENTITY_FILE}" ]; then
+        age-keygen -y "${TUNNEL_IDENTITY_FILE}"
+      else
+        mkdir -p "${TUNNEL_IDENTITY_FILE%/*}"; chmod 700 "${TUNNEL_IDENTITY_FILE%/*}"
+        age-keygen -o "${TUNNEL_IDENTITY_FILE}" |& cut -d ' ' -f 3
+        chmod 600 "${TUNNEL_IDENTITY_FILE}"
+      fi
+      ;;
+  esac
+}; export -f genID
 
 hmac(){
   # Usage: hmac <key in hex> <data to be hashed in hex>
@@ -40,29 +70,9 @@ digest(){
   # Brief: Generate hex digest of given strings
   # Usage: digest <string1> <string2>...
   local val="$(sha1 "${@}")"
-  local key="$(sha1 "TUNNEL_KEY" "${TUNNEL_KEY}")"
+  local key="$(sha1 "${TUNNEL_KEY}" "$(genID)")"
   hmac "${key}" "${val}"
 }; export -f digest
-
-genID(){
-  # Brief: Generate ID unique to localhost and user. Should also work on virtual systems / Heroku dynos.
-  # Usage: genID
-  #TODO: REWRITE
-  case "${ID_mode}" in
-    ipfs)
-      ipfs config Identity.PeerID
-      ;;
-    *)
-      if [ -f "${TUNNEL_IDENTITY_FILE}" ]; then
-        age-keygen -y "${TUNNEL_IDENTITY_FILE}"
-      else
-        mkdir -p "${TUNNEL_IDENTITY_FILE%/*}"; chmod 700 "${TUNNEL_IDENTITY_FILE%/*}"
-        age-keygen -o "${TUNNEL_IDENTITY_FILE}" |& cut -d ' ' -f 3
-        chmod 600 "${TUNNEL_IDENTITY_FILE}"
-      fi
-      ;;
-  esac
-}; export -f genID
 
 duplex(){
   # Brief: Create duplex (bi-directional) connection to given channels
@@ -99,7 +109,7 @@ client(){
   sess_payload="$(age -e -r "${peer%%:*}" -a <<<"${self} ${sess_key}")" || return 1
 
   local -i dial_count=0; echo -en "\ntunnel-client: Dialing...\r"
-  ([[ -n "${TUNNEL_IP}" ]] && socat -u -t 0.1 /dev/null "${TUNNEL_L4}:${TUNNEL_IP}:${peer##*:}") || \
+  ([[ -n "${TUNNEL_IP}" ]] && timeout 0.1 socat /dev/null "${TUNNEL_L4}:${TUNNEL_IP}:${peer##*:}") || \
   until pub "${peer_addr}" "${sess_payload}";do
     echo -en "tunnel-client: Dialing...${dial_count}\r"
     ((dial_count++))
@@ -122,7 +132,7 @@ client(){
       ipfs swarm connect /ip4/127.0.0.1/tcp/${self##*:}/p2p/${peer%%:*} &>/dev/null || break
     fi
     sleep 7
-    ([[ -n "${TUNNEL_IP}" ]] && socat -u -t 0.1 /dev/null "${TUNNEL_L4}:${TUNNEL_IP}:${peer##*:}") || \
+    ([[ -n "${TUNNEL_IP}" ]] && timeout 0.1 socat /dev/null "${TUNNEL_L4}:${TUNNEL_IP}:${peer##*:}") || \
     (flock -n 3 || exit 0; pub "${pairing}" "ping")3<"${lock}" || break
     # exit 0 above makes sure loop is never exited due to flock, i.e. when it fails to acquire lock. Like: flock -nE0 <cmd>.
   done && rm -f "${lock}" && client "${@}" # This recursion won't launch socat again thanks to socat_lock
@@ -160,7 +170,7 @@ _forward(){
   local self="${1}" peer="${2}"
   local peer_port="${peer##*:}"
   local source="${SOCAT_PEERADDR}:${SOCAT_PEERPORT}"
-  if [[ -n "${TUNNEL_IP}" ]] && socat -u -t 0.1 /dev/null "${TUNNEL_L4}:${TUNNEL_IP}:${peer_port}"; then # Checks if ${TUNNEL_IP}:${peer_port} is listening
+  if [[ -n "${TUNNEL_IP}" ]] && timeout 0.1 socat /dev/null "${TUNNEL_L4}:${TUNNEL_IP}:${peer_port}"; then # Checks if ${TUNNEL_IP}:${peer_port} is listening
     echo -e "tunnel-connect: ${source} <--> ${self} <--> ${TUNNEL_IP}:${peer_port}\n" >&2
     socat STDIO "${TUNNEL_L4}:${TUNNEL_IP}:${peer_port}"
   else
@@ -197,10 +207,13 @@ _forwardee(){
 
 pscan(){
   # Brief: Give an unused, random, local TCP/UDP port for the client to listen to
-  #TODO: Add timeout for if stuck
   local port
   for port in $(seq 49152 65535 | tac);do
-    socat -u -t 0.1 /dev/null "${TUNNEL_L4}:localhost:${port}" &>/dev/null || { echo "${port}" && return 0;}
+    timeout 0.1 socat "${TUNNEL_L4}-LISTEN:${port},reuseaddr" STDIO &>/dev/null
+    if [[ "${?}" == '124' ]]; then # Implies binding was successful and timeout was needed to exit
+      echo "${port}"
+      return 0
+    fi
   done
   return 1
 }; export -f pscan
@@ -312,7 +325,7 @@ install(){
 
 check_dep(){
   # Brief: Check if the dependencies are present
-  local -a need dep=( socat curl openssl xxd cut flock pkill mktemp age uuidgen stunnel sslh haproxy )
+  local -a need dep=( socat curl openssl xxd cut flock pkill mktemp age uuidgen )
   local tool
   for tool in "${dep[@]}";do
     command -v "${tool}" || need+=($'\n'"  ${tool}")
