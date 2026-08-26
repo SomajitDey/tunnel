@@ -8,7 +8,8 @@
 #TODO: Use `haproxy` for pooling connections to piping-server (also HTTP/2 multiplexing and TLS)
 #TODO: Remove `ipfs` support in favor of protocol demuxer `sslh` and `SOCKS5` behind it at the server
 #TODO: Let server detect and send its local IP to client peer to check for direct connectivity
-#TODO: Deprecate UDP support. Naive UDP over TCP is disaster
+#TODO: Deprecate UDP support. Naive UDP over TCP is disaster.Use `openvpn` for UDP to TCP wrap
+#TODO: Keep per-session ping channel open, i.e. stream the pub. Channel close triggers redial
 
 shopt -s extglob
 # Remark : -k option has been used in curl below to make tunnel run in some old servers (learnt from experience)
