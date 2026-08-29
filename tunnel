@@ -87,17 +87,17 @@ EXEC:curl -k -sfSNT- -o /dev/null ${TUNNEL_RELAY//:/\\:}/${wchan}"
 }; export -f duplex
 
 pub(){
-  # Brief: Publish given string to given channel
-  # Usage: pub <channel> <string>
-  local chan="${1}" msg="${2}"
-  curl -k -m 3 -sfSNd "${msg}" "${TUNNEL_RELAY}/${chan}"
+  # Brief: Publish stdin to given channel, encrypted for the recipient (age-protocol)
+  # Usage: pub <channel> <age recipient>
+  local chan="${1}" recipient="${2}"
+  age -e -r "${recipient}" -a | curl -k -m 3 -sfSNT- "${TUNNEL_RELAY}/${chan}"
 } &>/dev/null; export -f pub
 
 sub(){
-  # Brief: Read from given channel
+  # Brief: Read from given channel and decipher
   # Usage: sub <channel>
   local chan="${1}"
-  curl -k -sfSN "${TUNNEL_RELAY}/${chan}"
+  curl -k -sfSN "${TUNNEL_RELAY}/${chan}" | age -d -i "${TUNNEL_IDENTITY_FILE}"
 } 2>/dev/null; export -f sub
 
 client(){
@@ -106,12 +106,10 @@ client(){
   local self="$(genID):${1}" peer="${2}"
   local peer_addr="$(digest "${peer}" "${TUNNEL_L4}")"
   local sess_key="$(uuidgen)" # Random session key
-  local sess_payload
-  sess_payload="$(age -e -r "${peer%%:*}" -a <<<"${self} ${sess_key}")" || return 1
 
   local -i dial_count=0; echo -en "\ntunnel-client: Dialing...\r"
   ([[ -n "${TUNNEL_IP}" ]] && timeout 0.1 socat /dev/null "${TUNNEL_L4}:${TUNNEL_IP}:${peer##*:}") || \
-  until pub "${peer_addr}" "${sess_payload}";do
+  until pub "${peer_addr}" "${peer%%:*}" <<< "${self} ${sess_key}";do
     echo -en "tunnel-client: Dialing...${dial_count}\r"
     ((dial_count++))
   done
@@ -134,7 +132,7 @@ client(){
     fi
     sleep 7
     ([[ -n "${TUNNEL_IP}" ]] && timeout 0.1 socat /dev/null "${TUNNEL_L4}:${TUNNEL_IP}:${peer##*:}") || \
-    (flock -n 3 || exit 0; pub "${pairing}" "ping")3<"${lock}" || break
+    (flock -n 3 || exit 0; pub "${pairing}" "${peer%%:*}" <<< "ping")3<"${lock}" || break
     # exit 0 above makes sure loop is never exited due to flock, i.e. when it fails to acquire lock. Like: flock -nE0 <cmd>.
   done && rm -f "${lock}" && client "${@}" # This recursion won't launch socat again thanks to socat_lock
 }>&2; export -f client
@@ -157,7 +155,7 @@ server(){
   local -i req_count=0
   local buffer loop=true
   while "${loop}"; do
-    buffer="$(sub "${self_addr}" | age -d -i "${TUNNEL_IDENTITY_FILE}" 2>/dev/null)" || continue
+    buffer="$(sub "${self_addr}")" || continue
     local peer="${buffer%% *}" sess_key="${buffer##* }"
     _forwardee "${peer}" "${self}" "${sess_key}" &
     echo -e "tunnel-request [#${req_count}]: (From) ${peer} (Session-Key) ${sess_key} (Handler-PID) ${!}\n"
@@ -181,7 +179,7 @@ _forward(){
   local pairing="$(digest "${self}" "${peer}" "${sess_key}")"
   local lock="${socat_lock}_${pairing}"
   local nonce="$(uuidgen)" 
-  (flock -w 1 3 && pub "${pairing}" "${source} ${nonce}")3<"${lock}" || return "${?}"
+  (flock -w 1 3 && pub "${pairing}" "${peer%%:*}" <<< "${source} ${nonce}")3<"${lock}" || return "${?}"
   echo -e "tunnel-connect: ${source} <--> ${self} <--> ${peer}\n" >&2
   local wchan="$(digest "${source}" "${self}" "${peer}" "${nonce}")" # Out Stream: Source -> Self -> Peer
   local rchan="$(digest "${peer}" "${self}" "${source}" "${nonce}")" # In Stream: Peer -> Self -> Source
