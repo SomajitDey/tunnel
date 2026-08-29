@@ -19,13 +19,13 @@ Secure, multiplexed, TCP/UDP port forwarder using [piping-server](https://github
 
 For the special case of **IPFS**, see [#examples](#examples) below.
 
-**<u>ID</u>:** Every node is given a unique ([base64](https://datatracker.ietf.org/doc/html/rfc2045#page-24)) ID -
+**<u>ID</u>:** Every node is given a unique identifier (in [bech32](https://github.com/bitcoin/bips/blob/master/bip-0173.mediawiki#user-content-Bech32) format) -
 
 ```bash
 tunnel -i
 ```
 
-ID is bound to hardware (MAC address) and the environment variables USER, HOME and HOSTNAME. Share it with your peers once and for all. Note: two users on the same machine are given separate node-IDs because their USER and HOME variables differ.
+Share this ID with your peers once and for all.
 
 **<u>Server mode</u>:** Expose your local port to peers with whom you share any secret string -
 
