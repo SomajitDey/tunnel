@@ -19,13 +19,13 @@ Secure, multiplexed, TCP/UDP port forwarder using [piping-server](https://github
 
 For the special case of **IPFS**, see [#examples](#examples) below.
 
-**<u>ID</u>:** Every node is given a unique ([base64](https://datatracker.ietf.org/doc/html/rfc2045#page-24)) ID -
+**<u>ID</u>:** Every node is given a unique identifier (in [bech32](https://github.com/bitcoin/bips/blob/master/bip-0173.mediawiki#user-content-Bech32) format) -
 
 ```bash
 tunnel -i
 ```
 
-ID is bound to hardware (MAC address) and the environment variables USER, HOME and HOSTNAME. Share it with your peers once and for all. Note: two users on the same machine are given separate node-IDs because their USER and HOME variables differ.
+Share this ID with your peers once and for all.
 
 **<u>Server mode</u>:** Expose your local port to peers with whom you share any secret string -
 
@@ -90,7 +90,7 @@ tunnel -c update
 
 # Dependency/Portability
 
-This program is simply an executable `bash` script depending on standard GNU tools including `socat`, `openssl`, `curl`, `mktemp`, `cut`, `awk`,  `sed` , `flock`, `pkill`, `dd`, `xxd`, `base64` etc. that are readily available on standard Linux distros.
+This program is simply an executable `bash` script depending on standard GNU tools including `socat`, `openssl`, `curl`, `mktemp`, `cut`, `flock`, `pkill`, `xxd` etc. that are readily available on standard Linux distros. For crypto, it also uses `age`.
 
 If your system lacks any of these tools, and you do not have the `sudo` privilege required to install it from the native package repository (e.g. `sudo apt-get install <package>`), try downloading a [portable binary](https://github.com/ernw/static-toolbox/releases) and install it locally at `${HOME}/.bin`.
 
@@ -161,40 +161,41 @@ At your local machine, use `tunnel` to forward a TCP port to the remote port. Po
 
 # Applications
 
-Below are some random use-cases I could think of for `tunnel`. Broadly speaking, anything that involves NAT/firewall traversal (e.g. WebRTC without TURN) or joining a remote LAN, should find `tunnel` useful. Some of the following ideas are rather sketchy, haven't been tested at all, and may not work, but nonetheless are documented here, at least for the time being, just for the sake of inspiration. If you found any of these useful, or useless, or you have found entirely new applications for `tunnel`, please post at [discussions](https://github.com/SomajitDey/tunnel/discussions). Those cases that I have tested are labelled as "working".
+**I dogfooded `tunnel` myself for years to access my University's LAN from my home PC**. Broadly speaking, anything that involves NAT/firewall traversal or accessing a remote node without a public IP, should find `tunnel` useful.
 
-- Connecting to [IPFS](https://docs.ipfs.io/concepts/what-is-ipfs/#decentralization) peers (*Working*).
-- P2P chatting, mailing, VoIP, streaming, gaming, screen-sharing, file-sharing, gambling, troubleshooting and what not.
-- Connecting IOT devices.
-- Connecting your workstation with your home-computer or laptop with SSH (*Working*), [RDP](https://en.wikipedia.org/wiki/Remote_Desktop_Protocol) or [VNC](https://en.wikipedia.org/wiki/Virtual_Network_Computing).
-- [Shell-shovelling](https://en.wikipedia.org/wiki/Shell_shoveling) (*Working*).
-- Beat your firewall with a self-hosted or peer-provided VPN.
-- Joining intranet office chats (over office LAN) from your home across the internet. For example, [BeeBEEP](https://www.beebeep.net/) and [LAN Messenger](https://lanmessenger.github.io/) may use a local port that has been forwarded to from a node inside your office using `tunnel`.
-- P2P (serverless) audio/video. For example, forward a local TCP/UDP port to peer's localhost and point your p2p client to it.  Ready-made FOSS: [Jami](https://jami.net/), [Jitsi](https://jitsi.org/), [Toxchat](https://tox.chat/) and [Retroshare](https://retroshare.cc/).
-- Serverless remote-control using [Teamviewer](https://community.teamviewer.com/English/kb/articles/4618-can-teamviewer-be-used-within-a-local-network-lan-only) or [Anydesk](https://support.anydesk.com/Settings#Direct_Connection). Forward a local port, say 6000, to peer's local TCP port [5938](https://community.teamviewer.com/English/kb/articles/4139-which-ports-are-used-by-teamviewer) (for TV) and [7070](https://support.anydesk.com/Settings#Local_Port_Listening) (for Anydesk) and use *127.0.0.1:6000* as the *IP:port* tuple of the peer.
-- Making a local (web) port publicly accessible, *a.k.a* reverse-proxy accessible from the internet: Simply run `tunnel` at Heroku (for free) and forward the port stored in the environment variable `PORT` to your local port that you want to expose. And you have your public URL as: https://your-app-name.herokuapp.com.
-- Accessing feed from a remote [IP webcam](https://play.google.com/store/apps/details?id=com.pas.webcam&hl=en_IN&gl=US) using a [universal network camera adapter](http://ip-webcam.appspot.com/): Forward a local port to a remote node that can access the mobile cam over [WLAN](https://en.wikipedia.org/wiki/Wireless_LAN).
-- Streaming with VLC: [Movies and Music](https://www.howtogeek.com/118075/how-to-stream-videos-and-music-over-the-network-using-vlc/), [Webcam](https://forums.tomsguide.com/faq/how-to-stream-videos-over-the-internet-with-vlc.23235/) [[command-line](https://medium.com/@petehouston/streaming-webcam-to-http-using-vlc-dda7259176c9)]. Just connect the server and client using `tunnel`.
+Usually you'd want to expose `tunnel` at the remote node once, yet use multiple services hosted at or available exclusively from there. `sslh` and `SOCKS` are the exact tools for this.
+
+- At the remote node, configure `sslh` to listen to the port that you will expose with `tunnel`. `sslh` sniffs the first bytes of any incoming request and connects it to its desired service as configured.
+
+- A `SOCKS` proxy, on the other hand, can send your request anywhere on the internet. This is the only thing you'd need to access the internet from your peer's (i.e. the remote server) IP address. Setup a `SOCKS` proxy behind the `sslh` at the remote node.
+
+- If WebRTC p2p is needed, setup a TURN server with `coturn` behind `sslh`.
+
+- `tunnel` now represents the remote port (that `sslh` is listening to) as a local port in your PC.
+
+- Point all your client apps to this local port. For web browsing, set up your browser to use the local port as a SOCKS proxy.
+
+I could access paywalled journals subscribed by my University from my home browser for free using this setup. Also used it for remote desktop (as a free alternative to AnyDesk), file transfer and of course SSH. Using the `-I` option meant whenever my local PC and the remote node came on the same LAN (e.g. when I connected my laptop to the office LAN), `tunnel` connected the two directly, bypassing the piping-server relay.
 
 # Security
 
 `tunnel` encrypts all traffic between a peer and the relay with TLS, if the relay uses https. There is no end-to-end encryption *per se* between the peers themselves. However, the piping-server relay is claimed to be *[storageless](https://github.com/nwtgck/piping-server#ideas)*.
 
-A client peer can connect with a serving peer only if they use the same secret key (TUNNEL_KEY). The key is primarily used for peer discovery at the relay stage. For every new connection to the forwarded local port, the client sends a random session key to the serving peer. The peers then form a new connection at another relay point based on this random key for the actual data transfer to occur. Outsiders, viz. bad actors who don't know the TUNNEL_KEY shouldn't be able to disrupt this flow.
+A client peer can connect with a serving peer only if they use the same secret key (TUNNEL_KEY). The key is primarily used for peer discovery at the relay stage. For every new connection to the forwarded local port, the client sends a random session key to the serving peer. The peers then form a new connection at another relay point based on this random key for the actual data transfer to occur. Outsiders, viz. bad actors who don't know the TUNNEL_KEY shouldn't be able to guess and disrupt this flow.
 
-However, a malicious peer can do the following. Because he knows the TUNNEL_KEY and the node ID of the serving peer, he can impersonate the latter. Data from an unsuspecting connecting peer, therefore, would be forwarded to the impersonator, starving the genuine server. Future updates/implementations of `tunnel` should handle this threat using public key crypto. [In that case, the random session key generated for every new connection to be forwarded, would be decryptable by the genuine server alone].
+~~However, a malicious peer can do the following. Because he knows the TUNNEL_KEY and the node ID of the serving peer, he can impersonate the latter. Data from an unsuspecting connecting peer, therefore, would be forwarded to the impersonator, starving the genuine server. Future updates/implementations of `tunnel` should handle this threat using public key crypto. [In that case, the random session key generated for every new connection to be forwarded, would be decryptable by the genuine server alone].~~ < **This was fixed in v1.0.0**
 
-Given that `tunnel` is essentially the transport layer, the above points should not be discouraging, because most applications such as SSH and IPFS encrypt data at the application layer. Encrypting `tunnel` end-to-end for *all* data transfers would only add to the latency. However, you can always create an SSH-tunnel after establishing the low-level peering with `tunnel`, if you so choose.
+Currently `tunnel` trusts the piping-server as a Man-In-The-Middle (MITM). Most applications that you would use `tunnel` with, such as SSH, HTTPS and IPFS, secure the connection themselves, eliminating any MITM threat. Adding E2EE(TLS) to `tunnel` for *all* data transfers would only add unnecessary overhead. For insecure applications however, you can always create a secure SSH-tunnel after establishing the low-level peering with `tunnel`.
 
 # Relay
 
-The default relay used by `tunnel` is https://ppng.io. You can also use some other public relay from this [list](https://github.com/nwtgck/piping-server#public-servers) or [host your own instance](https://github.com/nwtgck/piping-server#self-host-on-free-services) on free services such as offered by [Heroku](https://www.heroku.com/). Needless to say, to connect, two peers must use the same relay.
+The default relay used by `tunnel` is https://ppng.io. You can also use some other public relay from this [list](https://github.com/nwtgck/piping-server#public-servers) or [host your own instance](https://github.com/nwtgck/piping-server#self-host-on-free-services). Needless to say, to connect, two peers must use the same relay.
 
-If you so choose, you can also write your own relay to be used by `tunnel` using simple tools like [sertain](https://github.com/SomajitDey/sertain). Just make sure your relay service has the same API as [piping-server](https://github.com/nwtgck/piping-server). If your relay code is open source, you are most welcome to introduce it at [discussions](https://github.com/SomajitDey/tunnel/discussions).
+If you so choose, you can also write your own relay to be used by `tunnel` in your preferred language. Just make sure your relay service has the same API as [piping-server](https://github.com/nwtgck/piping-server). If your relay code is open source, you are most welcome to introduce it at [discussions](https://github.com/SomajitDey/tunnel/discussions).
 
 # See also
 
-[gsocket](https://github.com/hackerschoice/gsocket) ; [ipfs p2p](https://github.com/ipfs/go-ipfs/blob/master/docs/experimental-features.md#ipfs-p2p) with [circuit-relay enabled](https://gist.github.com/SomajitDey/7c17998825bb105466ef2f9cefdc6d43) ; [go-piping-duplex](https://github.com/nwtgck/go-piping-duplex) ; [pipeto.me](https://pipeto.me) ; [uplink](https://getuplink.de) ; [localhost.run](https://localhost.run/) ; [ngrok](https://ngrok.io) ; [localtunnel](https://github.com/localtunnel/localtunnel) ; [sshreach.me](https://sshreach.me) (*free trial for limited period only*) ; [more](https://gist.github.com/SomajitDey/efd8f449a349bcd918c120f37e67ac00)
+[gsocket](https://github.com/hackerschoice/gsocket) ; [ipfs p2p](https://github.com/ipfs/go-ipfs/blob/master/docs/experimental-features.md#ipfs-p2p) with [circuit-relay enabled](https://gist.github.com/SomajitDey/7c17998825bb105466ef2f9cefdc6d43) ; [go-piping-duplex](https://github.com/nwtgck/go-piping-duplex) ; [pipeto.me](https://pipeto.me) ; [uplink](https://getuplink.de) ; [localhost.run](https://localhost.run/) ; [ngrok](https://ngrok.io) ; [localtunnel](https://github.com/localtunnel/localtunnel) ; [sshreach.me](https://sshreach.me) (*free trial for limited period only*) ; [httprelay.io](https://httprelay.io) ; [more](https://gist.github.com/SomajitDey/efd8f449a349bcd918c120f37e67ac00)
 
 **Notes:** 
 
@@ -222,13 +223,17 @@ Creating an SSH tunnel between local and peer port would be as easy as:
 
 Note that, while connecting, one no more needs to provide a login name. The `${USER}` of the serving node is taken as the login name by default. However, if needed, a non-default login name can always be passed using an environment variable or option.
 
-**GPG:**
+~~**GPG:**~~
 
-Virtual machines, such as used by cloud-shells and dynos, do not have persistent, unique hardware addresses. The node ID therefore keeps on changing from session to session for such a VM. Future `tunnel` would have a `-g` option which would pass a GPG private key to  `tunnel`. The node ID would be generated from the fingerprint of this key, [akin to what IPFS does](https://docs.libp2p.io/concepts/peer-id/). This would also make `tunnel` more secure.
+~~Virtual machines, such as used by cloud-shells and dynos, do not have persistent, unique hardware addresses. The node ID therefore keeps on changing from session to session for such a VM. Future `tunnel` would have a `-g` option which would pass a GPG private key to  `tunnel`. The node ID would be generated from the fingerprint of this key, [akin to what IPFS does](https://docs.libp2p.io/concepts/peer-id/). This would also make `tunnel` more secure.~~ < This was implemented in v1.0.0 with `age` instead of GPG.
 
 **Argon2:**
 
 Option [`-a`] to use [argon2](https://github.com/P-H-C/phc-winner-argon2) for hashing TUNNEL_KEY before use, so that a weaker secret isn't too vulnerable.
+
+**Optional E2EE (TLS):**
+
+Implementable using `stunnel` with `PSKsecrets`. This feature must be optional as most apps secure the connection themselves.
 
 # Bug-reports and Feedbacks
 
@@ -242,5 +247,5 @@ Thanks ! :smiley:
 
 ------
 
-###### [Copyright](https://github.com/SomajitDey/tunnel/blob/main/LICENSE) &copy; 2021 [Somajit Dey](https://github.com/SomajitDey)
+###### [Copyright](https://github.com/SomajitDey/tunnel/blob/main/LICENSE) &copy; 2021-2026 [Somajit Dey](https://github.com/SomajitDey)
 
