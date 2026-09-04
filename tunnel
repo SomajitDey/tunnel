@@ -103,16 +103,45 @@ sub(){
     age -d -i "${TUNNEL_IDENTITY_FILE}"
 } 2>/dev/null; export -f sub
 
+extract_peerID(){
+  # Brief: Extract peerID from given domain name or URL or slug. Also check peerID integrity.
+  # Usage: extract_peerID <domain> | <url> | <peerID (age-recipient-slug)>[:<port>]
+  local slug="${1%%:*}" peerID
+
+  #TODO: Implement URL (HTML meta tag)
+  if [[ "${slug}" =~ \. ]]; then
+    peerID="$(dig "_tunnel.${slug}" TXT +short | grep -m1 'tunnel=' | cut -d'=' -f2)"
+    [[ -n "${peerID}" ]] || return 2 # Failure to extract peerID from DNS TXT record
+  else
+    peerID="${slug}"
+    [[ -n "${peerID}" ]] || return 4 # Empty peerID given!
+  fi
+
+  age -e -r "${peerID}" > /dev/null <<< "dummy" || return 1
+  echo "${peerID}"
+} 2>/dev/null; export -f extract_peerID
+
 client(){
   # Brief: Set up local port forwarding to peer and keep the connection(s) alive
   # Usage: client <local_port> <peer_ID:peer_port>
-  local self="$(genID):${1}" peer="${2}"
+  local self="$(genID):${1}" peer="${2}" peerID
+
+  peerID="$(extract_peerID "${peer}")" # `peerID` empty if `extract_peerID` fails
+  case "${?}" in
+    0) ;;
+    1) echo -n "Corrupt peer ID.";;&
+    2) echo -n "Failed to extract peer ID from DNS record.";;&
+    3) ;;& #TODO: HTML meta tag extraction failed
+    4) echo -n "Empty peer ID!";;&
+    *) echo "Exiting."; exit 1;;
+  esac
+
   local peer_addr="$(digest "${peer}" "${TUNNEL_L4}")"
   local sess_key="$(uuidgen)" # Random session key
 
   local -i dial_count=0; echo -en "\ntunnel-client: Dialing...\r"
   ([[ -n "${TUNNEL_IP}" ]] && timeout 0.1 socat /dev/null "${TUNNEL_L4}:${TUNNEL_IP}:${peer##*:}") || \
-  until pub "${peer_addr}" "${peer%%:*}" <<< "${self} ${sess_key}";do
+  until pub "${peer_addr}" "${peerID}" <<< "${self} ${sess_key}";do
     echo -en "tunnel-client: Dialing...${dial_count}\r"
     ((dial_count++))
   done
@@ -135,7 +164,7 @@ client(){
     fi
     sleep 7
     ([[ -n "${TUNNEL_IP}" ]] && timeout 0.1 socat /dev/null "${TUNNEL_L4}:${TUNNEL_IP}:${peer##*:}") || \
-    (flock -n 3 || exit 0; pub "${pairing}" "${peer%%:*}" <<< "ping")3<"${lock}" || break
+    (flock -n 3 || exit 0; pub "${pairing}" "${peerID}" <<< "ping")3<"${lock}" || break
     # exit 0 above makes sure loop is never exited due to flock, i.e. when it fails to acquire lock. Like: flock -nE0 <cmd>.
   done && rm -f "${lock}" && client "${@}" # This recursion won't launch socat again thanks to socat_lock
 }>&2; export -f client
@@ -397,7 +426,7 @@ main(){
         server "${arg}"
       fi
       ;;
-    +([[:alnum:]+/])?(:+([[:digit:]])) | +([[:alnum:]]) )
+    +([[:alnum:]+/.])?(:+([[:digit:]])) | +([[:alnum:]]) )
       if [[ "${arg}" == "${arg##*:}" ]]; then
         export ID_mode="ipfs"
         launch_ipfs_daemon
