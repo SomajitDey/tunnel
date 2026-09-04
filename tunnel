@@ -452,7 +452,7 @@ main(){
         server "${arg}"
       fi
       ;;
-    +([[:alnum:]+/.])?(:+([[:digit:]])) | +([[:alnum:]]) )
+    +([[:alnum:].-])?(:+([[:digit:]])) | +([[:alnum:]]) )
       check_for_updates
       if [[ "${arg}" == "${arg##*:}" ]]; then
         export ID_mode="ipfs"
