@@ -340,7 +340,7 @@ about(){
 "  Tunnel: Peer-to-peer, secure, multiplexed, TCP/UDP port forwarder with NAT/firewall traversal through relay(s)
   Version: $(version)
   GitHub: SomajitDey/tunnel
-  Copyright (C) 2021 Somajit Dey
+  Copyright (C) 2021-2026 Somajit Dey, PhD
   License: GNU GPL v3 or later
   Help: tunnel -h"
 }; export -f about
