@@ -14,12 +14,14 @@ Secure, multiplexed, TCP/UDP port forwarder using [piping-server](https://github
 8. [Option to host your own relay server (easily and for free)](https://github.com/nwtgck/piping-server#self-host-on-free-services).
 9. KISS: Just a single, small, portable, shell-script.
 10. Built in installer and updater.
+11. Opt-in custom domains: Bring your own domain(s) to replace long, messy peer ID(s).
 
 # Command-line
 
-For the special case of **IPFS**, see [#examples](#examples) below.
+> [!NOTE]
+> For the special case of **IPFS**, see the [examples](#examples) below.
 
-**<u>ID</u>:** Every node is given a unique identifier (in [bech32](https://github.com/bitcoin/bips/blob/master/bip-0173.mediawiki#user-content-Bech32) format) -
+**<u>ID</u>:** Every node is given a unique identifier in [bech32](https://github.com/bitcoin/bips/blob/master/bip-0173.mediawiki#user-content-Bech32) format -
 
 ```bash
 tunnel -i
@@ -38,6 +40,9 @@ tunnel [options] [-u] [-k <shared-secret>] <local-port>
 ```bash
 tunnel [options] [-u] [-k <shared-secret>] [-b <local-port>] [-I <IP>] <peer-ID:peer-port>
 ```
+
+> [!TIP]
+> You may also pass a custom domain instead of the long bech32 `peer-ID` string, as discussed [here](#custom-domains).
 
 If no local-port is provided using the `-b` option, `tunnel` uses a random unused port. The port used, is always reported at stdout.
 
@@ -88,11 +93,11 @@ To update anytime after installation:
 tunnel -c update
 ```
 
-# Dependency/Portability
+# Dependencies
 
-This program is simply an executable `bash` script depending on standard GNU tools including `socat`, `openssl`, `curl`, `mktemp`, `cut`, `flock`, `pkill`, `xxd` etc. that are readily available on standard Linux distros. For crypto, it also uses `age`.
+This program is simply an executable `bash` script depending on standard GNU tools, such as `socat`, `openssl`, `curl`, `mktemp`, `cut`, `flock`, `pkill` and `xxd`, that are readily available on standard Linux distros. For providing cryptographic security, it also uses `[age](https://github.com/filosottile/age#installation)`.
 
-If your system lacks any of these tools, and you do not have the `sudo` privilege required to install it from the native package repository (e.g. `sudo apt-get install <package>`), try downloading a [portable binary](https://github.com/ernw/static-toolbox/releases) and install it locally at `${HOME}/.bin`.
+If your system lacks any of these tools, and you do not have the `sudo` privilege required to install it from the native package repository (e.g. `sudo apt-get install <package>`), try downloading a [portable binary](https://github.com/ernw/static-toolbox/releases) and install it locally at `${HOME}/.bin`. If nothing works, you can always build and install the required open-source tool locally.
 
 # Examples
 
@@ -159,6 +164,30 @@ Need to connect to a remote [Redis](https://redis.io/) instance hosted by a peer
 
 At your local machine, use `tunnel` to forward a TCP port to the remote port. Point your `redis-cli` at the forwarded local port.
 
+# Custom Domains
+
+If you own a custom domain, you may want to map it to your `tunnel` ID, so that you can pass that domain to the `tunnel` client instead of the long bech32 ID string.
+
+For example, consider you're publicly hosting a web server at `www.example.com:443`. The firewall at the server, however, does not allow incoming connections from the public internet to any port other than `443`. To `ssh` into the server from outside, you'd want to bypass the firewall using `tunnel`. It'd be very convenient if the `tunnel` client could extract the server's long bech32 peer-ID from the hostname (i.e. `www.example.com`) itself.
+
+To achieve this, simply login to your domain registrar or DNS provider and publish your *server's bech32 ID prefixed with `tunnel=`* as a `TXT` record against your *hostname prefixed with `_tunnel.`*.
+
+Once you map your ID to the hostname, say `www.example.com`, verify the following holds:
+
+```bash
+$ dig _tunnel.www.example.com TXT +short
+# Output of the above command should contain the following line:
+tunnel=age12c2950resnl0f5fqjr8r47hnqpnk4qwh3hfs6fvalx6shr7r849qdl2ad5
+# Used a random peer-ID for illustration above
+```
+
+Now you can launch the `tunnel` client simply as:
+```bash
+tunnel -k "${secret}" www.example.com:22
+
+# Provided the server's running: tunnel -k "${secret}" 22
+```
+
 # Applications
 
 **I dogfooded `tunnel` myself for years to access my University's LAN from my home PC**. Broadly speaking, anything that involves NAT/firewall traversal or accessing a remote node without a public IP, should find `tunnel` useful.
@@ -185,7 +214,7 @@ A client peer can connect with a serving peer only if they use the same secret k
 
 ~~However, a malicious peer can do the following. Because he knows the TUNNEL_KEY and the node ID of the serving peer, he can impersonate the latter. Data from an unsuspecting connecting peer, therefore, would be forwarded to the impersonator, starving the genuine server. Future updates/implementations of `tunnel` should handle this threat using public key crypto. [In that case, the random session key generated for every new connection to be forwarded, would be decryptable by the genuine server alone].~~ < **This was fixed in v1.0.0**
 
-Currently `tunnel` trusts the piping-server as a Man-In-The-Middle (MITM). Most applications that you would use `tunnel` with, such as SSH, HTTPS and IPFS, secure the connection themselves, eliminating any MITM threat. Adding E2EE(TLS) to `tunnel` for *all* data transfers would only add unnecessary overhead. For insecure applications however, you can always create a secure SSH-tunnel after establishing the low-level peering with `tunnel`.
+Currently `tunnel` trusts the piping-server relay as a Man-In-The-Middle (MITM). Most applications that you would use `tunnel` with, such as SSH, HTTPS and IPFS, secure the connection themselves, eliminating any MITM threat. Adding E2EE(TLS) to `tunnel` for *all* data transfers would only add unnecessary overhead. For insecure applications however, you can always create a secure SSH-tunnel after establishing the low-level peering with `tunnel`.
 
 # Relay
 
@@ -235,17 +264,16 @@ Option [`-a`] to use [argon2](https://github.com/P-H-C/phc-winner-argon2) for ha
 
 Implementable using `stunnel` with `PSKsecrets`. This feature must be optional as most apps secure the connection themselves.
 
-# Bug-reports and Feedbacks
+# Contribute
 
-Please report bugs at [issues](https://github.com/SomajitDey/tunnel/issues). Post your thoughts, comments, ideas, use-cases and feature-requests at [discussion](https://github.com/SomajitDey/tunnel/discussions). Let me know how this helped you, if it did at all.
+- Please report bugs at [issues](https://github.com/SomajitDey/tunnel/issues). 
 
-Also feel free to write to me [directly](mailto://hereistitan@gmail.com) about anything regarding this project.
+- Post your thoughts, comments, ideas, use-cases and feature-requests at [discussion](https://github.com/SomajitDey/tunnel/discussions).
 
-If [this](https://github.com/SomajitDey/tunnel/blob/main/tunnel) little script is of any use to you, a [star](https://github.com/SomajitDey/tunnel/stargazers) would be immensely encouraging for me. 
+- If you're using this little tool in your daily life, please :star: this repository ... and share it with others!
 
-Thanks ! :smiley:
+- If you're feeling generous today, click the **Sponsor** button on this page :smiley:
 
 ------
 
 ###### [Copyright](https://github.com/SomajitDey/tunnel/blob/main/LICENSE) &copy; 2021-2026 [Somajit Dey](https://github.com/SomajitDey)
-

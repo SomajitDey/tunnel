@@ -2,14 +2,14 @@
 # Brief: This self-contained bash script contains all necessary code for the "tunnel" CLI.
 # Remarks: Make it executable and run it to see what it's about and its usage instructions.
 # Source: https://github.com/SomajitDey/tunnel/
-export TUNNEL_VERSION='1.0.0' # Semver. Only major updates may have breaking changes.
+export TUNNEL_VERSION='1.1.0' # Semver. Only major updates may have breaking changes.
 
 #TODO: Make E2EE using `stunnel` with PSKsecrets
 #TODO: Use `haproxy` for pooling connections to piping-server (also HTTP/2 multiplexing and TLS)
 #TODO: Remove `ipfs` support in favor of protocol demuxer `sslh` and `SOCKS5` behind it at the server
 #TODO: Let server detect and send its local IP to client peer to check for direct connectivity
 #TODO: Deprecate UDP support. Naive UDP over TCP is disaster.Use `openvpn` for UDP to TCP wrap
-#TODO: Keep per-session ping channel open, i.e. stream the pub. Channel close triggers redial
+#TODO: Keep per-session ping channel open, i.e. stream the pings. Channel close triggers immediate redial
 
 shopt -s extglob
 
@@ -103,16 +103,45 @@ sub(){
     age -d -i "${TUNNEL_IDENTITY_FILE}"
 } 2>/dev/null; export -f sub
 
+extract_peerID(){
+  # Brief: Extract peerID from given domain name or URL or slug. Also check peerID integrity.
+  # Usage: extract_peerID <domain> | <url> | <peerID (age-recipient-slug)>[:<port>]
+  local slug="${1%%:*}" peerID
+
+  #TODO: Implement URL (HTML meta tag)
+  if [[ "${slug}" =~ \. ]]; then
+    peerID="$(dig "_tunnel.${slug}" TXT +short | grep -m1 'tunnel=' | cut -d'=' -f2)"
+    [[ -n "${peerID}" ]] || return 2 # Failure to extract peerID from DNS TXT record
+  else
+    peerID="${slug}"
+    [[ -n "${peerID}" ]] || return 4 # Empty peerID given!
+  fi
+
+  age -e -r "${peerID}" > /dev/null <<< "dummy" || return 1
+  echo "${peerID}"
+} 2>/dev/null; export -f extract_peerID
+
 client(){
   # Brief: Set up local port forwarding to peer and keep the connection(s) alive
   # Usage: client <local_port> <peer_ID:peer_port>
-  local self="$(genID):${1}" peer="${2}"
+  local self="$(genID):${1}" peer="${2}" peerID
+
+  peerID="$(extract_peerID "${peer}")" # `peerID` empty if `extract_peerID` fails
+  case "${?}" in
+    0) ;;
+    1) echo -n "Corrupt peer ID.";;&
+    2) echo -n "Failed to extract peer ID from DNS record.";;&
+    3) ;;& #TODO: HTML meta tag extraction failed
+    4) echo -n "Empty peer ID!";;&
+    *) echo "Exiting."; exit 1;;
+  esac
+
   local peer_addr="$(digest "${peer}" "${TUNNEL_L4}")"
   local sess_key="$(uuidgen)" # Random session key
 
   local -i dial_count=0; echo -en "\ntunnel-client: Dialing...\r"
   ([[ -n "${TUNNEL_IP}" ]] && timeout 0.1 socat /dev/null "${TUNNEL_L4}:${TUNNEL_IP}:${peer##*:}") || \
-  until pub "${peer_addr}" "${peer%%:*}" <<< "${self} ${sess_key}";do
+  until pub "${peer_addr}" "${peerID}" <<< "${self} ${sess_key}";do
     echo -en "tunnel-client: Dialing...${dial_count}\r"
     ((dial_count++))
   done
@@ -135,7 +164,7 @@ client(){
     fi
     sleep 7
     ([[ -n "${TUNNEL_IP}" ]] && timeout 0.1 socat /dev/null "${TUNNEL_L4}:${TUNNEL_IP}:${peer##*:}") || \
-    (flock -n 3 || exit 0; pub "${pairing}" "${peer%%:*}" <<< "ping")3<"${lock}" || break
+    (flock -n 3 || exit 0; pub "${pairing}" "${peerID}" <<< "ping")3<"${lock}" || break
     # exit 0 above makes sure loop is never exited due to flock, i.e. when it fails to acquire lock. Like: flock -nE0 <cmd>.
   done && rm -f "${lock}" && client "${@}" # This recursion won't launch socat again thanks to socat_lock
 }>&2; export -f client
@@ -227,8 +256,11 @@ update(){
   local url="https://raw.githubusercontent.com/SomajitDey/tunnel/${branch}/tunnel"
   curl -ksfSNL --connect-timeout 5 -o "${tmp}" "${url}" || return "${?}"
   chmod +rx "${tmp}"
-  mv -f "${tmp}" "${script_file}" 2>/dev/null || sudo mv -f "${tmp}" "${script_file}" &&\
-  echo "Updated to v$(${script_file} -v)"
+  # Atomic rename. Use `sudo` if installed system-wide
+  mv -f "${tmp}" "${script_file}" 2>/dev/null \
+    || sudo mv -f "${tmp}" "${script_file}" \
+    || return "${?}"
+  echo "Updated to the latest version from git-ref: ${branch}"
 }; export -f update
 
 version(){
@@ -266,6 +298,14 @@ usage(){
   -u                  UDP instead of the default TCP. If server uses this option,client must use it too.
   -v                  Version
 
+  Custom domain instead of peer-ID:
+
+    To map <sub>.<domain>.<tld> to <peer-ID>, publish the following TXT record for
+    the host _tunnel.<sub>.<domain>.<tld> at your DNS provider or domain registrar.
+      tunnel=<peer-ID> 
+    Ensure you get the record back with:
+      dig _tunnel.<sub>.<domain>.<tld> TXT +short
+  
   Examples:
 
     # Generate node ID to be announced to peers
@@ -294,8 +334,7 @@ usage(){
     # Peer B connects to peer A over IPFS:
         tunnel -k swarm_key ipfs_peer_ID_of_A # Auto swarm connect with A in background
     # In another terminal:  
-        ipfs cat ipfs_hash_of_file # Getting the file peer A added to IPFS
-        
+        ipfs cat ipfs_hash_of_file # Getting the file peer A added to IPFS   
   "
 }; export -f usage
 
@@ -304,7 +343,7 @@ about(){
 "  Tunnel: Peer-to-peer, secure, multiplexed, TCP/UDP port forwarder with NAT/firewall traversal through relay(s)
   Version: $(version)
   GitHub: SomajitDey/tunnel
-  Copyright (C) 2021 Somajit Dey
+  Copyright (C) 2021-2026 Somajit Dey, PhD
   License: GNU GPL v3 or later
   Help: tunnel -h"
 }; export -f about
@@ -328,7 +367,7 @@ install(){
 
 check_dep(){
   # Brief: Check if the dependencies are present
-  local -a need dep=( socat curl openssl xxd cut flock pkill mktemp age uuidgen )
+  local -a need dep=( socat curl openssl xxd cut flock pkill mktemp age uuidgen dig )
   local tool
   for tool in "${dep[@]}";do
     command -v "${tool}" || need+=($'\n'"  ${tool}")
@@ -338,6 +377,24 @@ check_dep(){
     return 1
   fi
 } >&2; export -f check_dep
+
+check_for_updates(){
+  # Brief: Checks for updates
+  #TODO: Idiomatic implementation using GitHub list repository tags REST API
+    #This lucky jsdelivr header hack may break anytime as jsdelivr doesn't document this
+  local url="https://cdn.jsdelivr.net/gh/somajitdey/tunnel@latest/tunnel" upstream_version
+  upstream_version="$(curl -sNI "${url}" | grep -im1 'x-jsd-version' | cut -d ' ' -f2)" \
+    || return 1
+  local latest_version="$(
+    echo -e "${TUNNEL_VERSION}\n${upstream_version}" | sort -V | tail -n1
+  )"
+  if [[ "${latest_version}" != "${TUNNEL_VERSION}" ]]; then
+    echo -e "Update available: ${TUNNEL_VERSION} -> ${latest_version}"
+    echo -e "To update: tunnel -c update\n"
+  else
+    return 1
+  fi
+} 2>/dev/null; export -f check_for_updates
 
 launch_ipfs_daemon(){
   # Brief: Launch daemon if inactive
@@ -375,6 +432,7 @@ main(){
   local arg="${1}"
   case "${arg}" in
     +([[:digit:]]) | ipfs )
+      check_for_updates
       if [[ "${arg}" == ipfs ]]; then
         export ID_mode="ipfs"
         local swarm_listen="$(ipfs config Addresses.Swarm | grep -o '"/ip4/.*/tcp/[^"]*')"
@@ -397,7 +455,8 @@ main(){
         server "${arg}"
       fi
       ;;
-    +([[:alnum:]+/])?(:+([[:digit:]])) | +([[:alnum:]]) )
+    +([[:alnum:].-])?(:+([[:digit:]])) | +([[:alnum:]]) )
+      check_for_updates
       if [[ "${arg}" == "${arg##*:}" ]]; then
         export ID_mode="ipfs"
         launch_ipfs_daemon
