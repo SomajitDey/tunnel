@@ -2,14 +2,14 @@
 # Brief: This self-contained bash script contains all necessary code for the "tunnel" CLI.
 # Remarks: Make it executable and run it to see what it's about and its usage instructions.
 # Source: https://github.com/SomajitDey/tunnel/
-export TUNNEL_VERSION='1.0.0' # Semver. Only major updates may have breaking changes.
+export TUNNEL_VERSION='1.1.0' # Semver. Only major updates may have breaking changes.
 
 #TODO: Make E2EE using `stunnel` with PSKsecrets
 #TODO: Use `haproxy` for pooling connections to piping-server (also HTTP/2 multiplexing and TLS)
 #TODO: Remove `ipfs` support in favor of protocol demuxer `sslh` and `SOCKS5` behind it at the server
 #TODO: Let server detect and send its local IP to client peer to check for direct connectivity
 #TODO: Deprecate UDP support. Naive UDP over TCP is disaster.Use `openvpn` for UDP to TCP wrap
-#TODO: Keep per-session ping channel open, i.e. stream the pub. Channel close triggers redial
+#TODO: Keep per-session ping channel open, i.e. stream the pings. Channel close triggers immediate redial
 
 shopt -s extglob
 
@@ -295,6 +295,14 @@ usage(){
   -u                  UDP instead of the default TCP. If server uses this option,client must use it too.
   -v                  Version
 
+  Custom domain instead of peer-ID:
+
+    To map <sub>.<domain>.<tld> to <peer-ID>, publish the following TXT record for
+    the host _tunnel.<sub>.<domain>.<tld> at your DNS provider or domain registrar.
+      tunnel=<peer-ID> 
+    Ensure you get the record back with:
+      dig _tunnel.<sub>.<domain>.<tld> TXT +short
+  
   Examples:
 
     # Generate node ID to be announced to peers
@@ -323,8 +331,7 @@ usage(){
     # Peer B connects to peer A over IPFS:
         tunnel -k swarm_key ipfs_peer_ID_of_A # Auto swarm connect with A in background
     # In another terminal:  
-        ipfs cat ipfs_hash_of_file # Getting the file peer A added to IPFS
-        
+        ipfs cat ipfs_hash_of_file # Getting the file peer A added to IPFS   
   "
 }; export -f usage
 
@@ -357,7 +364,7 @@ install(){
 
 check_dep(){
   # Brief: Check if the dependencies are present
-  local -a need dep=( socat curl openssl xxd cut flock pkill mktemp age uuidgen )
+  local -a need dep=( socat curl openssl xxd cut flock pkill mktemp age uuidgen dig )
   local tool
   for tool in "${dep[@]}";do
     command -v "${tool}" || need+=($'\n'"  ${tool}")
@@ -367,6 +374,24 @@ check_dep(){
     return 1
   fi
 } >&2; export -f check_dep
+
+check_for_updates(){
+  # Brief: Checks for updates
+  #TODO: Idiomatic implementation using GitHub list repository tags REST API
+    #This lucky jsdelivr header hack may break anytime as jsdelivr doesn't document this
+  local url="https://cdn.jsdelivr.net/gh/somajitdey/tunnel@latest/tunnel" upstream_version
+  upstream_version="$(curl -sNI "${url}" | grep -im1 'x-jsd-version' | cut -d ' ' -f2)" \
+    || return 1
+  local latest_version="$(
+    echo -e "${TUNNEL_VERSION}\n${upstream_version}" | sort -V | tail -n1
+  )"
+  if [[ "${latest_version}" != "${TUNNEL_VERSION}" ]]; then
+    echo -e "Update available: ${TUNNEL_VERSION} -> ${latest_version}"
+    echo -e "To update: tunnel -c update\n"
+  else
+    return 1
+  fi
+} 2>/dev/null; export -f check_for_updates
 
 launch_ipfs_daemon(){
   # Brief: Launch daemon if inactive
@@ -404,6 +429,7 @@ main(){
   local arg="${1}"
   case "${arg}" in
     +([[:digit:]]) | ipfs )
+      check_for_updates
       if [[ "${arg}" == ipfs ]]; then
         export ID_mode="ipfs"
         local swarm_listen="$(ipfs config Addresses.Swarm | grep -o '"/ip4/.*/tcp/[^"]*')"
@@ -427,6 +453,7 @@ main(){
       fi
       ;;
     +([[:alnum:]+/.])?(:+([[:digit:]])) | +([[:alnum:]]) )
+      check_for_updates
       if [[ "${arg}" == "${arg##*:}" ]]; then
         export ID_mode="ipfs"
         launch_ipfs_daemon
