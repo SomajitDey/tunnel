@@ -14,6 +14,7 @@ Secure, multiplexed, TCP/UDP port forwarder using [piping-server](https://github
 8. [Option to host your own relay server (easily and for free)](https://github.com/nwtgck/piping-server#self-host-on-free-services).
 9. KISS: Just a single, small, portable, shell-script.
 10. Built in installer and updater.
+11. Opt-in custom domains: Bring your own domain(s) to replace long, messy peer ID(s).
 
 # Command-line
 
