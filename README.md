@@ -18,7 +18,7 @@ Secure, multiplexed, TCP/UDP port forwarder using [piping-server](https://github
 # Command-line
 
 > [!NOTE]
-> For the special case of **IPFS**, see [#examples](#examples) below.
+> For the special case of **IPFS**, see the [examples](#examples) below.
 
 **<u>ID</u>:** Every node is given a unique identifier in [bech32](https://github.com/bitcoin/bips/blob/master/bip-0173.mediawiki#user-content-Bech32) format -
 
@@ -98,22 +98,6 @@ This program is simply an executable `bash` script depending on standard GNU too
 
 If your system lacks any of these tools, and you do not have the `sudo` privilege required to install it from the native package repository (e.g. `sudo apt-get install <package>`), try downloading a [portable binary](https://github.com/ernw/static-toolbox/releases) and install it locally at `${HOME}/.bin`. If nothing works, you can always build and install the required open-source tool locally.
 
-# Custom Domains
-
-If you own a custom domain, you may want to map it to your `tunnel` ID, so that you can pass that domain to the `tunnel client` CLI instead of the long bech32 ID.
-
-For example, consider you're publicly hosting a web server at `www.example.com:443`. The firewall at the server, however, does not allow incoming connections from the public internet to any port other than `443`. To `ssh` into the server from outside you'd want to bypass the firewall using `tunnel`. It'd be very convenient if `tunnel` could extract the server's long bech32 peer-ID from the hostname (i.e. `example.com`) itself.
-
-To do this, simply login to your domain registrar or DNS provider and publish your *server's bech32 ID prefixed with `tunnel_`* as a TXT record against your *hostname prefixed with `_tunnel.`*.
-
-Once you map your ID to the hostname, say `www.example.com`, verify the following holds:
-
-```bash
-$ dig _tunnel.www.example.com TXT +short
-# Output of the above command should contain:
-tunnel=age12c2950resnl0f5fqjr8r47hnqpnk4qwh3hfs6fvalx6shr7r849qdl2ad5
-```
-
 # Examples
 
 **<u>*SSH*</u>:**
@@ -178,6 +162,30 @@ Using [rlwrap](https://github.com/hanslub42/rlwrap) is not a necessity. But it s
 Need to connect to a remote [Redis](https://redis.io/) instance hosted by a peer or yourself? At the remote host, expose the TCP port that `redis-server` runs on (default: 6379), with `tunnel`.
 
 At your local machine, use `tunnel` to forward a TCP port to the remote port. Point your `redis-cli` at the forwarded local port.
+
+# Custom Domains
+
+If you own a custom domain, you may want to map it to your `tunnel` ID, so that you can pass that domain to the `tunnel` client instead of the long bech32 ID string.
+
+For example, consider you're publicly hosting a web server at `www.example.com:443`. The firewall at the server, however, does not allow incoming connections from the public internet to any port other than `443`. To `ssh` into the server from outside, you'd want to bypass the firewall using `tunnel`. It'd be very convenient if the `tunnel` client could extract the server's long bech32 peer-ID from the hostname (i.e. `www.example.com`) itself.
+
+To achieve this, simply login to your domain registrar or DNS provider and publish your *server's bech32 ID prefixed with `tunnel=`* as a `TXT` record against your *hostname prefixed with `_tunnel.`*.
+
+Once you map your ID to the hostname, say `www.example.com`, verify the following holds:
+
+```bash
+$ dig _tunnel.www.example.com TXT +short
+# Output of the above command should contain the following line:
+tunnel=age12c2950resnl0f5fqjr8r47hnqpnk4qwh3hfs6fvalx6shr7r849qdl2ad5
+# Used a random peer-ID for illustration above
+```
+
+Now you can launch the `tunnel` client simply as:
+```bash
+tunnel -k "${secret}" www.example.com:22
+
+# Provided the server's running: tunnel -k "${secret}" 22
+```
 
 # Applications
 
