@@ -256,8 +256,11 @@ update(){
   local url="https://raw.githubusercontent.com/SomajitDey/tunnel/${branch}/tunnel"
   curl -ksfSNL --connect-timeout 5 -o "${tmp}" "${url}" || return "${?}"
   chmod +rx "${tmp}"
-  mv -f "${tmp}" "${script_file}" 2>/dev/null || sudo mv -f "${tmp}" "${script_file}" &&\
-  echo "Updated to v$(${script_file} -v)"
+  # Atomic rename. Use `sudo` if installed system-wide
+  mv -f "${tmp}" "${script_file}" 2>/dev/null \
+    || sudo mv -f "${tmp}" "${script_file}" \
+    || return "${?}"
+  echo "Updated to the latest version from git-ref: ${branch}"
 }; export -f update
 
 version(){
