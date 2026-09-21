@@ -18,9 +18,6 @@ Secure, multiplexed, TCP/UDP port forwarder using [piping-server](https://github
 
 # Command-line
 
-> [!NOTE]
-> For the special case of **IPFS**, see the [examples](#examples) below.
-
 **<u>ID</u>:** Every node is given a unique identifier in [bech32](https://github.com/bitcoin/bips/blob/master/bip-0173.mediawiki#user-content-Bech32) format -
 
 ```bash
@@ -50,7 +47,9 @@ The `-I` option is handy when client is running on a laptop that occasionally ge
 
 Client and server must use the same secret to be able to connect with each other. The secret string may also be passed using the environment variable `TUNNEL_KEY`. Secret passed with `-k` takes precedence.
 
-`-u` flag denotes use of UDP instead of the default TCP. If used, it must be used by both the peers.
+The `-u` flag enables forwarding UDP traffic. If used, it must be used by both the peers.
+> [!IMPORTANT]
+> With the `-u` flag, `tunnel` naively sends UDP packets over a TCP tunnel, merging the independent UDP datagrams into a continuous byte stream. Because this strips away all message boundaries, only UDP applications that implement internal framing within their payloads can parse this stream; all others will fail. For reliable UDP over TCP, it's best to use `tunnel` in its default TCP mode alongside a proper framing utility like [`udp-over-tcp`](https://github.com/jonhoo/udp-over-tcp).
 
 All logs are at stderr by default. With the `-l <logfile>` option, however, one can launch `tunnel` in background (**<u>daemon mode</u>**) with logs dumped at `<logfile>`. The daemon process ID is shown to the user during launch so that he can kill the daemon anytime with 
 ```bash
@@ -115,28 +114,6 @@ Peer B connects -
 tunnel -b 67868 -k "${secret}" -l /dev/null "${peerA_ID}:22" # Daemon due to -l
 ssh -l "${login_name}" -p 67868 localhost 
 ```
-
-**<u>*IPFS*</u>:**
-
-Let peer A has [IPFS-peer-ID](https://docs.libp2p.io/concepts/peer-id/): `12orQmAlphanumeric`. Her IPFS daemon listens at default TCP port 4001. She exposes it with -
-
-```bash
-tunnel -k "${swarm_key}" ipfs
-```
-
-`swarm_key` is just any secret string peer A may use to control who can swarm connect to her using `tunnel`. 
-
-Peer B now connects with peer A for [file-sharing](https://docs.ipfs.io/concepts/usage-ideas-examples/) or [pubsub](https://github.com/ipfs/go-ipfs/blob/master/docs/experimental-features.md#ipfs-pubsub) or [p2p](https://github.com/ipfs/go-ipfs/blob/master/docs/experimental-features.md#ipfs-p2p) -
-
-```bash
-tunnel -k "${swarm_key}" 12orQmAlphanumeric
-```
-
-This last command swarm connects to peer A through the [piping-server relay](https://ppng.io) and keeps on swarm connecting every few seconds in the background to keep the connection alive. 
-
-`tunnel` starts the IPFS daemon in background if not already active.
-
-The path to IPFS repo may be passed with the option `-r`. Otherwise, the environment variable `IPFS_PATH` or the default path `~/.ipfs` is used as usual. Example: `tunnel -r ~/.ipfs -i` gives the IPFS peer ID.
 
 **<u>*Remote Shell*</u>:**
 
@@ -210,7 +187,9 @@ I could access paywalled journals subscribed by my University from my home brows
 
 `tunnel` encrypts all traffic between a peer and the relay with TLS, if the relay uses https. There is no end-to-end encryption *per se* between the peers themselves. However, the piping-server relay is claimed to be *[storageless](https://github.com/nwtgck/piping-server#ideas)*.
 
-A client peer can connect with a serving peer only if they use the same secret key (TUNNEL_KEY). The key is primarily used for peer discovery at the relay stage. For every new connection to the forwarded local port, the client sends a random session key to the serving peer. The peers then form a new connection at another relay point based on this random key for the actual data transfer to occur. Outsiders, viz. bad actors who don't know the TUNNEL_KEY shouldn't be able to guess and disrupt this flow.
+A client peer can connect with a serving peer only if they use the same secret key (TUNNEL_KEY). The key is primarily used for peer discovery at the relay stage.
+
+For every new connection to the forwarded local port, the client sends a random session key to the serving peer. The peers then form a new connection at another rendezvous based on this random key for the actual data transfer to occur. Outsiders, viz. bad actors who don't know the TUNNEL_KEY shouldn't be able to guess and disrupt this flow.
 
 ~~However, a malicious peer can do the following. Because he knows the TUNNEL_KEY and the node ID of the serving peer, he can impersonate the latter. Data from an unsuspecting connecting peer, therefore, would be forwarded to the impersonator, starving the genuine server. Future updates/implementations of `tunnel` should handle this threat using public key crypto. [In that case, the random session key generated for every new connection to be forwarded, would be decryptable by the genuine server alone].~~ < **This was fixed in v1.0.0**
 
@@ -233,14 +212,6 @@ If you so choose, you can also write your own relay to be used by `tunnel` in yo
 3. Some expose your local port for web-traffic only. The onus of transporting non-web protocols over HTTP is left on you and your peers.
 
 # Future directions
-
-**IPFS (Done):** 
-
-Connecting to IPFS would be much simpler: 
-
-`tunnel -k <secret> ipfs` to expose and `tunnel -k <secret> <IPFS_peerID>` to connect. 
-
-These will launch the IPFS daemon on their own, if offline. The latter command will repeatedly swarm connect to the given peer at 30s intervals. The IPFS-peer-ID will be used as the node ID, so peers would no more need to share their node IDs separately. Non-default IPFS repo paths may be passed with option `-r`. or `IPFS_PATH`.
 
 **SSH:**
 

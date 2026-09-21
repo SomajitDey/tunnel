@@ -2,11 +2,10 @@
 # Brief: This self-contained bash script contains all necessary code for the "tunnel" CLI.
 # Remarks: Make it executable and run it to see what it's about and its usage instructions.
 # Source: https://github.com/SomajitDey/tunnel/
-export TUNNEL_VERSION='1.1.0' # Semver. Only major updates may have breaking changes.
+export TUNNEL_VERSION='1.2.0' # Semver. Only major updates may have breaking changes.
 
 #TODO: Make E2EE using `stunnel` with PSKsecrets
 #TODO: Use `haproxy` for pooling connections to piping-server (also HTTP/2 multiplexing and TLS)
-#TODO: Remove `ipfs` support in favor of protocol demuxer `sslh` and `SOCKS5` behind it at the server
 #TODO: Let server detect and send its local IP to client peer to check for direct connectivity
 #TODO: Deprecate UDP support. Naive UDP over TCP is disaster.Use `openvpn` for UDP to TCP wrap
 #TODO: Keep per-session ping channel open, i.e. stream the pings. Channel close triggers immediate redial
@@ -35,20 +34,13 @@ export TUNNEL_IDENTITY_FILE="${HOME}/.tunnel/age-identity.txt" # Home of the pri
 genID(){
   # Brief: Generate ID. ID is basically the public key of an `age` key-pair.
   # Usage: genID
-  case "${ID_mode}" in
-    ipfs)
-      ipfs config Identity.PeerID
-      ;;
-    *)
-      if [ -f "${TUNNEL_IDENTITY_FILE}" ]; then
-        age-keygen -y "${TUNNEL_IDENTITY_FILE}"
-      else
-        mkdir -p "${TUNNEL_IDENTITY_FILE%/*}"; chmod 700 "${TUNNEL_IDENTITY_FILE%/*}"
-        age-keygen -o "${TUNNEL_IDENTITY_FILE}" |& cut -d ' ' -f 3
-        chmod 600 "${TUNNEL_IDENTITY_FILE}"
-      fi
-      ;;
-  esac
+  if [ -f "${TUNNEL_IDENTITY_FILE}" ]; then
+    age-keygen -y "${TUNNEL_IDENTITY_FILE}"
+  else
+    mkdir -p "${TUNNEL_IDENTITY_FILE%/*}"; chmod 700 "${TUNNEL_IDENTITY_FILE%/*}"
+    age-keygen -o "${TUNNEL_IDENTITY_FILE}" |& cut -d ' ' -f 3
+    chmod 600 "${TUNNEL_IDENTITY_FILE}"
+  fi
 }; export -f genID
 
 hmac(){
@@ -158,11 +150,7 @@ client(){
   # Failure to ping the server triggers reconnect (with new sess_key for forward secrecy).
   until [[ -e "${socat_lock}" ]];do sleep 0.01;done; touch "${lock}"; echo "${sess_key}" > "${socat_lock}"
   # Wait till socat_lock is created by the background socat, then write sess_key therein for `_forward` to read
-  while :; do
-    if [[ "${ID_mode}" == ipfs ]]; then 
-      ipfs swarm connect /ip4/127.0.0.1/tcp/${self##*:}/p2p/${peer%%:*} &>/dev/null || break
-    fi
-    sleep 7
+  while sleep 7; do
     ([[ -n "${TUNNEL_IP}" ]] && timeout 0.1 socat /dev/null "${TUNNEL_L4}:${TUNNEL_IP}:${peer##*:}") || \
     (flock -n 3 || exit 0; pub "${pairing}" "${peerID}" <<< "ping")3<"${lock}" || break
     # exit 0 above makes sure loop is never exited due to flock, i.e. when it fails to acquire lock. Like: flock -nE0 <cmd>.
@@ -176,13 +164,8 @@ server(){
   local self_addr="$(digest "${self}" "${TUNNEL_L4}")"
   echo -e "tunnel-server: PID=${BASHPID}; Started: $(date)\n"
   echo -e "tunnel-server: Listening for incoming connections to localhost:${self##*:}...\n"
-  if [[ "${ID_mode}" != ipfs ]]; then
-    echo -e "tunnel-server: For peers to connect, share\n$(command tput smso 2>/dev/null)\"${self}\"$(command tput rmso 2>/dev/null)\n& your secret key (if any)\n"
-    echo -e "tunnel-server: Also make sure you and your peer are using the same major version of tunnel\n"
-  else
-    echo -e "tunnel-server: For peers to connect, share\n$(command tput smso 2>/dev/null)\"$(genID)\"$(command tput rmso 2>/dev/null)\n& your secret key (if any)\n"
-    echo -e "tunnel-server: Also make sure you and your peer are using the same major version of tunnel\n"
-  fi
+  echo -e "tunnel-server: For peers to connect, share\n$(command tput smso 2>/dev/null)\"${self}\"$(command tput rmso 2>/dev/null)\n& your secret key (if any)\n"
+  echo -e "tunnel-server: Also make sure you and your peer are using the same major version of tunnel\n"
   # Using `command` with tput above, protects against unavailablity of the tput command 
   local -i req_count=0
   local buffer loop=true
@@ -272,9 +255,6 @@ usage(){
   About: tunnel
   Client (Forwarder): tunnel [options] [-k <secret>] [-b <local-port>] [-I <IP>] <peer-ID:peer-port>
   Server (Forwardee): tunnel [options] [-k <secret>] <local-port>
-
-  IPFS-Connectee: tunnel [-r <path-to-ipfs-repo>] [-k <secret>] ipfs
-  IPFS-Connector: tunnel [-r <path-to-ipfs-repo>] [-k <secret>] <IPFS-peer-ID-of-connectee>
   
   Update: tunnel -c update
   Install locally: tunnel -c install -l
@@ -284,7 +264,7 @@ usage(){
   
   -b <local-port>     Forward <local-port>. If absent, forwards a random, unused port shown at stdout.
   -h                  Help
-  -i                  ID, bound to hardware (MAC), USER, HOME and HOSTNAME
+  -i                  ID, to be shared with peer clients
 
   -I <IP>             If <IP>:<peer-port> is available, connect directly, without going through TUNNEL_RELAY.
                       This option comes handy when the client-host (e.g. laptop) occasionally gets connected
@@ -294,47 +274,38 @@ usage(){
   -K <PID>            Kill tunnel daemon with process id = <PID>.
   -l <logfile>        Use <logfile> instead of default stderr. This makes the client/server run as daemon.
   -p <piping-server>  Choose <piping-server> as the relay. Can use environment variable TUNNEL_RELAY instead.
-  -r <path-to-ipfs-repo> Pass path to IPFS repository
   -u                  UDP instead of the default TCP. If server uses this option,client must use it too.
   -v                  Version
 
   Custom domain instead of peer-ID:
 
     To map <sub>.<domain>.<tld> to <peer-ID>, publish the following TXT record for
-    the host _tunnel.<sub>.<domain>.<tld> at your DNS provider or domain registrar.
+    the host _tunnel.<sub>.<domain>.<tld> at your DNS provider or domain registrar:
       tunnel=<peer-ID> 
+
     Ensure you get the record back with:
-      dig _tunnel.<sub>.<domain>.<tld> TXT +short
+      $ dig _tunnel.<sub>.<domain>.<tld> TXT +short
   
   Examples:
 
     # Generate node ID to be announced to peers
-        tunnel -i
+        $ tunnel -i
 
     # Expose local UDP port 4001 (default IPFS port) for peers to connect to
-        TUNNEL_KEY='shared secret' tunnel -u 4001
+        $ TUNNEL_KEY='shared secret' tunnel -u 4001
 
     # Forward local UDP port 9090 to UDP port 4001 of peer
-        tunnel -uk 'shared secret' -b 9090 'peer_ID:4001'
+        $ tunnel -uk 'shared secret' -b 9090 'peer_ID:4001'
 
     # Forward any random unused local TCP port to TCP peer_port
-        tunnel -k 'secret key' 'peer_ID:peer_port'
+        $ tunnel -k 'secret key' 'peer_ID:peer_port'
 
     # Run server in daemon mode
-        tunnel -l \"/tmp/tunnel-log\" 22
+        $ tunnel -l \"/tmp/tunnel-log\" 22
 
     # SSH to the above peer
-        tunnel -l /dev/null peer_ID:22 # This client will give forwarded local port at stdout
-        ssh user@localhost -p port_obtained_from_client
-        
-    # Peer A has a file. He adds it to IPFS:
-        ipfs add path_to_file # Gives out IPFS hash of file
-        tunnel -k swarm_key ipfs # Exposes ipfs daemon of peer A.
-    
-    # Peer B connects to peer A over IPFS:
-        tunnel -k swarm_key ipfs_peer_ID_of_A # Auto swarm connect with A in background
-    # In another terminal:  
-        ipfs cat ipfs_hash_of_file # Getting the file peer A added to IPFS   
+        $ tunnel -l /dev/null peer_ID:22 # Emits forwarded local port at stdout
+        $ ssh user@localhost -p port_obtained_from_client
   "
 }; export -f usage
 
@@ -383,7 +354,7 @@ check_for_updates(){
   #TODO: Idiomatic implementation using GitHub list repository tags REST API
     #This lucky jsdelivr header hack may break anytime as jsdelivr doesn't document this
   local url="https://cdn.jsdelivr.net/gh/somajitdey/tunnel@latest/tunnel" upstream_version
-  upstream_version="$(curl -sNI "${url}" | grep -im1 'x-jsd-version' | cut -d ' ' -f2)" \
+  upstream_version="$(curl -sNI "${url}" | grep -im1 'x-jsd-version' | cut -d ' ' -f2 | tr -d '\r')" \
     || return 1
   local latest_version="$(
     echo -e "${TUNNEL_VERSION}\n${upstream_version}" | sort -V | tail -n1
@@ -396,26 +367,17 @@ check_for_updates(){
   fi
 } 2>/dev/null; export -f check_for_updates
 
-launch_ipfs_daemon(){
-  # Brief: Launch daemon if inactive
-  until ipfs swarm peers &>/dev/null;do
-    ipfs daemon --enable-pubsub-experiment >&2 &
-    sleep 3
-  done
-}; export -f launch_ipfs_daemon
-
 main(){
   check_dep || return 1
 
   local opt subcommand logfile local_port
-  while getopts K:k:p:uI:r:cl:b:ihv opt; do
+  while getopts K:k:p:uI:cl:b:ihv opt; do
     case "${opt}" in
       K) kill_proc_tree "${OPTARG}" ; exit;;
       k) export TUNNEL_KEY="${OPTARG}";;
       p) export TUNNEL_RELAY="${OPTARG}";;
       u) export TUNNEL_L4="UDP";;
       I) export TUNNEL_IP="${OPTARG}";;
-      r) export IPFS_PATH="${OPTARG}";export ID_mode="ipfs";;
       c) subcommand="set";;
       l) logfile="${OPTARG}";;
       b) local_port="${OPTARG}";;
@@ -431,37 +393,20 @@ main(){
 
   local arg="${1}"
   case "${arg}" in
-    +([[:digit:]]) | ipfs )
+    +([[:digit:]]) )
       check_for_updates
-      if [[ "${arg}" == ipfs ]]; then
-        export ID_mode="ipfs"
-        local swarm_listen="$(ipfs config Addresses.Swarm | grep -o '"/ip4/.*/tcp/[^"]*')"
-        arg="${swarm_listen##*/}"
-        ((arg==4001)) || { echo "tunnel-ipfs: Only default tcp port 4001 supported for now. Exiting." >&2; exit 1;}
-        launch_ipfs_daemon
-      fi
       if [[ -v logfile ]]; then
         server "${arg}" &> "${logfile}" & local pid="${!}" ; disown
         echo -n "tunnel-server: daemon-PID=" >&2
         echo "${pid}"
-        if [[ "${ID_mode}" != ipfs ]];then
-          echo -n "tunnel-server: ID-port-tuple=" >&2
-          echo "$(genID):${arg}"
-        else
-          echo -n "tunnel-server: IPFS-Peer-ID=" >&2
-          echo "$(genID)"
-        fi
+        echo -n "tunnel-server: ID-port-tuple=" >&2
+        echo "$(genID):${arg}"
       else
         server "${arg}"
       fi
       ;;
-    +([[:alnum:].-])?(:+([[:digit:]])) | +([[:alnum:]]) )
+    +([[:alnum:].-]):+([[:digit:]]) )
       check_for_updates
-      if [[ "${arg}" == "${arg##*:}" ]]; then
-        export ID_mode="ipfs"
-        launch_ipfs_daemon
-        arg="${arg}:4001"
-      fi
       local_port="${local_port:-"$(pscan)"}"
       echo -n "tunnel-client: port=" >&2
       echo "${local_port}"
